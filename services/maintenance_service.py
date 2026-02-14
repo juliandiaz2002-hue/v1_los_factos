@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime
 
 import pandas as pd
 from sqlalchemy import select
@@ -32,7 +31,6 @@ class MaintenanceService:
         return self.mov_repo.restore_ignored(unique_key)
 
     def export_full_backup(self) -> bytes:
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         buffer = io.BytesIO()
 
         with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:

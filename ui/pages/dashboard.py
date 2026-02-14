@@ -845,8 +845,6 @@ def render_dashboard_page(session) -> None:
     risk_pct = projection_bundle["risk_pct"]
     delta_vs_baseline = projection_bundle["delta_vs_baseline"]
     next_month_projection = projection_bundle["next_month_projection"]
-    top_category_name = projection_bundle["top_category_name"]
-    top_category_share = projection_bundle["top_category_share"]
     progress_pct = projection_bundle["progress_pct"]
     calibration = projection_bundle["calibration"]
     core_insights, dynamic_insights = _build_projection_insights(
