@@ -28,11 +28,13 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 ```
-3. Ejecutar migraciones:
+3. Opcion A (recomendada): usar PostgreSQL y ejecutar migraciones
 ```bash
 alembic upgrade head
 ```
-4. Correr app:
+4. Opcion B (prueba rapida local): dejar `DATABASE_URL` vacia para usar SQLite local automaticamente.
+
+5. Correr app:
 ```bash
 streamlit run app.py
 ```
@@ -40,6 +42,7 @@ streamlit run app.py
 ## Deploy
 - Produccion: branch `main` en Streamlit Community Cloud
 - Staging: branch `develop` en Streamlit Community Cloud (app separada)
+- Checklist de salida a staging/produccion: `docs/staging-checklist.md`
 
 ## Seguridad
 - Nunca commitear secretos.

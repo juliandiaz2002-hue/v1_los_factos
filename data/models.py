@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, JSON, String, Text, UniqueConstraint, func, text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from utils.constants import (
@@ -17,6 +17,10 @@ from utils.constants import (
 
 class Base(DeclarativeBase):
     pass
+
+
+ID_PK_TYPE = BigInteger().with_variant(Integer, "sqlite")
+ID_FK_TYPE = BigInteger().with_variant(Integer, "sqlite")
 
 
 class TimestampMixin:
@@ -32,7 +36,7 @@ class TimestampMixin:
 class Categoria(TimestampMixin, Base):
     __tablename__ = "categorias"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(ID_PK_TYPE, primary_key=True, autoincrement=True)
     nombre: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
     activa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
 
@@ -46,15 +50,20 @@ class Categoria(TimestampMixin, Base):
 class Movimiento(TimestampMixin, Base):
     __tablename__ = "movimientos"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(ID_PK_TYPE, primary_key=True, autoincrement=True)
     fecha: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     detalle: Mapped[str] = mapped_column(Text, nullable=False)
     detalle_norm: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     monto_abs_clp: Mapped[int] = mapped_column(BigInteger, nullable=False)
     tipo_movimiento: Mapped[str] = mapped_column(String(20), nullable=False, default=MOVEMENT_TYPE_EXPENSE)
     estado: Mapped[str] = mapped_column(String(20), nullable=False, default=MOVEMENT_STATUS_ACTIVE, index=True)
-    categoria_id: Mapped[int] = mapped_column(ForeignKey("categorias.id"), nullable=False, index=True)
-    suggested_categoria_id: Mapped[Optional[int]] = mapped_column(ForeignKey("categorias.id"), nullable=True, index=True)
+    categoria_id: Mapped[int] = mapped_column(ID_FK_TYPE, ForeignKey("categorias.id"), nullable=False, index=True)
+    suggested_categoria_id: Mapped[Optional[int]] = mapped_column(
+        ID_FK_TYPE,
+        ForeignKey("categorias.id"),
+        nullable=True,
+        index=True,
+    )
     suggestion_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     suggestion_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     suggestion_status: Mapped[str] = mapped_column(String(20), nullable=False, default="NA", index=True)
@@ -70,10 +79,10 @@ class Movimiento(TimestampMixin, Base):
 class CategoriaMap(Base):
     __tablename__ = "categoria_map"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(ID_PK_TYPE, primary_key=True, autoincrement=True)
     detalle_norm: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     monto_abs_clp: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
-    categoria_id: Mapped[int] = mapped_column(ForeignKey("categorias.id"), nullable=False, index=True)
+    categoria_id: Mapped[int] = mapped_column(ID_FK_TYPE, ForeignKey("categorias.id"), nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     hits: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
@@ -90,7 +99,7 @@ class CategoriaMap(Base):
 class MovimientoBorrado(Base):
     __tablename__ = "movimientos_borrados"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(ID_PK_TYPE, primary_key=True, autoincrement=True)
     unique_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     fecha: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     detalle_norm: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
@@ -102,9 +111,9 @@ class MovimientoBorrado(Base):
 class MovimientoIgnorado(Base):
     __tablename__ = "movimientos_ignorados"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(ID_PK_TYPE, primary_key=True, autoincrement=True)
     unique_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    movimiento_id: Mapped[Optional[int]] = mapped_column(ForeignKey("movimientos.id"), nullable=True)
+    movimiento_id: Mapped[Optional[int]] = mapped_column(ID_FK_TYPE, ForeignKey("movimientos.id"), nullable=True)
     reason: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     ignored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

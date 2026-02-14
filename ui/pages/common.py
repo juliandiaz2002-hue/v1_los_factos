@@ -8,20 +8,43 @@ import streamlit as st
 
 from services.movements_service import MovementFilters
 
+MONTH_NAMES = {
+    1: "Enero",
+    2: "Febrero",
+    3: "Marzo",
+    4: "Abril",
+    5: "Mayo",
+    6: "Junio",
+    7: "Julio",
+    8: "Agosto",
+    9: "Septiembre",
+    10: "Octubre",
+    11: "Noviembre",
+    12: "Diciembre",
+}
 
-def render_movement_filters(categories, *, key_prefix: str) -> tuple[MovementFilters, list[str]]:
-    st.subheader("Filtros")
+
+def render_movement_filters(
+    categories,
+    *,
+    key_prefix: str,
+    show_title: bool = True,
+) -> tuple[MovementFilters, list[str]]:
+    if show_title:
+        st.subheader("Filtros")
     col1, col2, col3, col4 = st.columns([1.6, 1, 1, 1.2])
 
     with col1:
         text_filter = st.text_input("Buscar texto", key=f"{key_prefix}_text")
 
     with col2:
+        current_month = date.today().month
+        month_options = [0] + list(range(1, 13))
         month_choice = st.selectbox(
             "Mes",
-            options=[0] + list(range(1, 13)),
-            index=0,
-            format_func=lambda value: "Todos" if value == 0 else f"{value:02d}",
+            options=month_options,
+            index=month_options.index(current_month),
+            format_func=lambda value: "Todos" if value == 0 else MONTH_NAMES[value],
             key=f"{key_prefix}_month",
         )
 
@@ -70,7 +93,7 @@ def render_movement_filters(categories, *, key_prefix: str) -> tuple[MovementFil
     if filters.text_filter:
         labels.append(f"Texto: {filters.text_filter}")
     if filters.month:
-        labels.append(f"Mes: {filters.month:02d}")
+        labels.append(f"Mes: {MONTH_NAMES[filters.month]}")
     if filters.year:
         labels.append(f"Ano: {filters.year}")
     if filters.category_id:

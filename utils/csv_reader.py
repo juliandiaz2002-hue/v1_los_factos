@@ -15,7 +15,8 @@ DELIMITER_CANDIDATES = (",", ";", "\t", "|")
 HEADER_ALIASES: dict[str, set[str]] = {
     "fecha": {"fecha", "date", "dia"},
     "detalle": {"detalle", "glosa", "descripcion", "descripcin", "concepto", "movimiento"},
-    "monto": {"monto", "importe", "cargo", "debe", "valor", "amount", "monto_real"},
+    "monto": {"monto", "importe", "cargo", "debe", "valor", "amount"},
+    "monto_real": {"monto_real"},
     "categoria": {"categoria", "rubro", "categoria_sugerida"},
     "nota_usuario": {"nota_usuario", "nota", "comentario", "observacion"},
     "unique_key": {"unique_key", "llave_unica", "id_unico"},
@@ -89,7 +90,13 @@ def parse_csv(payload: bytes) -> CsvParseResult:
         for key, value in row.items():
             if key is None:
                 continue
-            normalized_row[canonical_headers.get(key, key)] = value
+            canonical = canonical_headers.get(key, key)
+            existing = normalized_row.get(canonical)
+            if existing in {None, ""}:
+                normalized_row[canonical] = value
+            elif value not in {None, ""}:
+                # Keep the first non-empty value for a canonical column to avoid accidental overwrite.
+                continue
         rows.append(normalized_row)
 
     return CsvParseResult(rows=rows, encoding=encoding, delimiter=delimiter, raw_headers=raw_headers)

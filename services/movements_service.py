@@ -12,6 +12,7 @@ from data.models import Categoria, Movimiento
 from data.repositories.movimientos_repo import MovimientoRepository
 from services.dashboard_service import DashboardFilters, DashboardService
 from utils.constants import MOVEMENT_TYPE_EXPENSE
+from utils.config import get_settings
 from utils.hashing import build_unique_key
 from utils.normalization import normalize_text, parse_amount
 
@@ -31,6 +32,7 @@ class MovementsService:
         self.session = session
         self.repo = MovimientoRepository(session)
         self.dashboard = DashboardService(session)
+        self.settings = get_settings()
 
     def list_for_table(self, filters: MovementFilters) -> pd.DataFrame:
         dash_filters = DashboardFilters(
@@ -56,6 +58,8 @@ class MovementsService:
         payload = []
         for row in edited_rows:
             monto_abs, movement_type = parse_amount(row.get("monto_ui"))
+            if self.settings.assume_all_expenses:
+                movement_type = MOVEMENT_TYPE_EXPENSE
             payload.append(
                 {
                     "id": int(row["id"]),
@@ -82,6 +86,8 @@ class MovementsService:
 
         detalle_norm = normalize_text(detalle_clean)
         monto_abs, movement_type = parse_amount(monto_ui)
+        if self.settings.assume_all_expenses:
+            movement_type = MOVEMENT_TYPE_EXPENSE
         unique_key = build_unique_key(fecha=fecha, detalle_norm=detalle_norm, monto_abs_clp=monto_abs)
 
         if self.repo.is_tombstoned(unique_key):

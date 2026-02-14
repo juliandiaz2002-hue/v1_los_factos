@@ -9,6 +9,7 @@ from data.models import Movimiento
 from data.repositories import CategoriaRepository, MovimientoRepository
 from services.category_suggestion_service import CategorySuggestionService
 from utils.config import get_settings
+from utils.constants import MOVEMENT_TYPE_EXPENSE
 from utils.csv_reader import parse_csv
 from utils.errors import IngestionAppError
 from utils.hashing import build_unique_key
@@ -70,7 +71,15 @@ class IngestionService:
                     raise ValueError("Detalle vacio")
 
                 detalle_norm = normalize_text(detail_raw)
-                monto_abs_clp, tipo_movimiento = parse_amount(row.get("monto"))
+                raw_monto = row.get("monto")
+                if raw_monto in {None, ""}:
+                    raw_monto = row.get("monto_real")
+                monto_abs_clp, tipo_movimiento = parse_amount(raw_monto)
+
+                # Keep card uploads as expenses by default, even when raw sign is inconsistent.
+                es_gasto_raw = str(row.get("es_gasto", "")).strip().lower()
+                if settings.assume_all_expenses or es_gasto_raw in {"1", "true", "yes", "si", "sí"}:
+                    tipo_movimiento = MOVEMENT_TYPE_EXPENSE
                 unique_key = build_unique_key(
                     fecha=fecha,
                     detalle_norm=detalle_norm,

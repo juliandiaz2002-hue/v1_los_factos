@@ -55,38 +55,92 @@ def render_movimientos_page(session) -> None:
     if pending_df.empty:
         st.caption("No hay sugerencias pendientes.")
     else:
-        st.dataframe(pending_df, use_container_width=True, hide_index=True)
+        if "manual_mode_keys" not in st.session_state:
+            st.session_state.manual_mode_keys = []
+        manual_mode_keys: set[str] = set(st.session_state.manual_mode_keys)
+        pending_keys = set(pending_df["unique_key"].astype(str).tolist())
+        manual_mode_keys = manual_mode_keys.intersection(pending_keys)
+        st.session_state.manual_mode_keys = sorted(manual_mode_keys)
 
-        suggestion_keys = pending_df["unique_key"].astype(str).tolist()
-        selected_key = st.selectbox("Selecciona una sugerencia", options=suggestion_keys)
-        selected_row = pending_df[pending_df["unique_key"] == selected_key].iloc[0]
         st.caption(
-            f"Sugerida: {selected_row['categoria_sugerida']} | Fuente: {selected_row['fuente_sugerencia']} | Confianza: {selected_row['confianza']:.2f}"
+            "Marca Aceptar para aplicar y sacar de la lista al instante. "
+            "Si no te gusta, usa Rechazar y asigna categoria manual por fila."
         )
 
-        manual_category = st.selectbox(
-            "Categoria manual",
-            options=list(category_id_by_name.keys()),
-            key="suggestion_manual_category",
-        )
+        resolved_now: set[str] = set()
+        success_count = 0
+        for row in pending_df.to_dict("records"):
+            unique_key = str(row["unique_key"])
+            if unique_key in resolved_now:
+                continue
 
-        a, b, c = st.columns(3)
-        with a:
-            if st.button("Aceptar sugerencia", key="accept_suggestion_btn"):
-                service.resolve_suggestion(selected_key, "ACEPTAR")
-                st.success("Sugerencia aceptada")
-        with b:
-            if st.button("Rechazar sugerencia", key="reject_suggestion_btn"):
-                service.resolve_suggestion(selected_key, "RECHAZAR")
-                st.success("Sugerencia rechazada")
-        with c:
-            if st.button("Aplicar categoria manual", key="manual_suggestion_btn"):
-                service.resolve_suggestion(
-                    selected_key,
-                    "MANUAL",
-                    manual_category_id=category_id_by_name[manual_category],
+            is_manual_mode = unique_key in manual_mode_keys
+
+            c0, c1, c2, c3, c4, c5 = st.columns([0.8, 3.2, 1.5, 1.6, 1.8, 1.4])
+            with c0:
+                accept_checked = st.checkbox(
+                    "Aceptar",
+                    key=f"accept_suggestion_{unique_key}",
+                    value=False,
+                    label_visibility="collapsed",
+                    help="Aceptar sugerencia",
                 )
-                st.success("Sugerencia resuelta manualmente")
+                if accept_checked:
+                    if service.resolve_suggestion(unique_key, "ACEPTAR"):
+                        success_count += 1
+                        resolved_now.add(unique_key)
+                        manual_mode_keys.discard(unique_key)
+                        st.session_state.manual_mode_keys = sorted(manual_mode_keys)
+                        st.session_state.pop(f"accept_suggestion_{unique_key}", None)
+                    else:
+                        st.error(f"No fue posible aceptar {unique_key}")
+                    continue
+
+            with c1:
+                st.markdown(f"**{row['detalle']}**  \n{row['fecha']} | {int(row['monto_ui'])} CLP")
+            with c2:
+                st.caption("Sugerida")
+                st.write(row["categoria_sugerida"] or "Sin sugerencia")
+            with c3:
+                st.caption("Confianza / Fuente")
+                st.write(f"{row['confianza']:.2f} · {row['fuente_sugerencia']}")
+
+            if not is_manual_mode:
+                with c4:
+                    if st.button("Rechazar", key=f"reject_suggestion_{unique_key}"):
+                        manual_mode_keys.add(unique_key)
+                        st.session_state.manual_mode_keys = sorted(manual_mode_keys)
+                        is_manual_mode = True
+
+            if is_manual_mode:
+                with c4:
+                    manual_name = st.selectbox(
+                        "Categoria manual",
+                        options=list(category_id_by_name.keys()),
+                        key=f"manual_category_{unique_key}",
+                        label_visibility="collapsed",
+                    )
+                with c5:
+                    if st.button("Guardar manual", key=f"save_manual_{unique_key}"):
+                        saved = service.resolve_suggestion(
+                            unique_key,
+                            "MANUAL",
+                            manual_category_id=category_id_by_name[manual_name],
+                        )
+                        if saved:
+                            success_count += 1
+                            resolved_now.add(unique_key)
+                            manual_mode_keys.discard(unique_key)
+                            st.session_state.manual_mode_keys = sorted(manual_mode_keys)
+                            st.session_state.pop(f"manual_category_{unique_key}", None)
+                        else:
+                            st.error(f"No fue posible guardar categoria manual para {unique_key}")
+            else:
+                with c5:
+                    st.write("")
+
+        if success_count > 0:
+            st.success(f"Sugerencias aplicadas: {success_count}")
 
     filters, active_filters = render_movement_filters(categories, key_prefix="movimientos")
     render_filter_chips(active_filters)
@@ -98,6 +152,8 @@ def render_movimientos_page(session) -> None:
 
     editable_df = df[["id", "fecha", "detalle", "monto_ui", "categoria_id", "categoria", "nota_usuario", "unique_key"]].copy()
     editable_df["categoria"] = editable_df["categoria_id"].map(category_name_by_id)
+    editable_df["eliminar"] = False
+    st.caption("Puedes editar monto/categoria/nota y marcar `eliminar` para crear tombstone por fila.")
 
     edited = st.data_editor(
         editable_df,
@@ -112,6 +168,7 @@ def render_movimientos_page(session) -> None:
             "categoria_id": st.column_config.NumberColumn("Categoria ID", disabled=True),
             "nota_usuario": st.column_config.TextColumn("Nota"),
             "unique_key": st.column_config.TextColumn("Unique key", disabled=True),
+            "eliminar": st.column_config.CheckboxColumn("Eliminar"),
         },
         key="movimientos_data_editor",
     )
@@ -119,9 +176,14 @@ def render_movimientos_page(session) -> None:
     edited_records = edited.to_dict("records")
     original_by_id = {int(row["id"]): row for row in editable_df.to_dict("records")}
     updates = []
+    delete_keys: list[str] = []
 
     for row in edited_records:
         rid = int(row["id"])
+        if bool(row.get("eliminar")):
+            delete_keys.append(str(row["unique_key"]))
+            continue
+
         original = original_by_id[rid]
         if (
             row["monto_ui"] != original["monto_ui"]
@@ -139,9 +201,10 @@ def render_movimientos_page(session) -> None:
 
     col_save, col_dl = st.columns([1, 1])
     with col_save:
-        if st.button("Guardar cambios", type="primary"):
-            count = service.bulk_save(updates)
-            st.success(f"Registros actualizados: {count}")
+        if st.button("Aplicar cambios", type="primary", disabled=(len(updates) == 0 and len(delete_keys) == 0)):
+            updated_count = service.bulk_save(updates) if updates else 0
+            deleted_count = sum(1 for key in delete_keys if service.delete_one(key))
+            st.success(f"Actualizados: {updated_count} | Eliminados (tombstone): {deleted_count}")
 
     with col_dl:
         csv_bytes = service.export_filtered_csv(filters)
@@ -155,11 +218,6 @@ def render_movimientos_page(session) -> None:
         )
 
     keys = list(df["unique_key"].astype(str).tolist())
-    selected_for_delete = st.multiselect("Selecciona movimientos a eliminar (tombstone)", options=keys)
-    if st.button("Eliminar seleccionados"):
-        done = sum(1 for k in selected_for_delete if service.delete_one(k))
-        st.success(f"Movimientos marcados como borrados: {done}")
-
     selected_for_ignore = st.multiselect("Selecciona movimientos a ignorar", options=keys)
     if st.button("Ignorar seleccionados"):
         done = sum(1 for k in selected_for_ignore if service.ignore_one(k))

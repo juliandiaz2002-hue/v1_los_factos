@@ -88,22 +88,16 @@ class DashboardService:
                 "total_gasto": 0,
                 "cantidad_movimientos": 0,
                 "ticket_promedio": 0,
-                "total_ingresos": 0,
             }
 
-        gastos_df = df[df["tipo_movimiento"] == MOVEMENT_TYPE_EXPENSE]
-        ingresos_df = df[df["tipo_movimiento"] != MOVEMENT_TYPE_EXPENSE]
-
-        total_gasto = float(gastos_df["monto_abs_clp"].sum())
-        total_ingresos = float(ingresos_df["monto_abs_clp"].sum())
+        total_gasto = float(df["monto_abs_clp"].sum())
         count = int(df.shape[0])
-        ticket = float(gastos_df["monto_abs_clp"].mean()) if not gastos_df.empty else 0.0
+        ticket = float(df["monto_abs_clp"].mean()) if count else 0.0
 
         return {
             "total_gasto": total_gasto,
             "cantidad_movimientos": count,
             "ticket_promedio": ticket,
-            "total_ingresos": total_ingresos,
         }
 
     def get_month_comparison(self, *, year: int, month: int) -> dict[str, float]:
