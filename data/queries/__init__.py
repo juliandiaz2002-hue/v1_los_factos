@@ -1,0 +1,1 @@
+"""Queries reutilizables para analytics."""
