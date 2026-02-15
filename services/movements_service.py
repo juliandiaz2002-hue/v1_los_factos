@@ -130,6 +130,9 @@ class MovementsService:
     def restore_ignored(self, unique_key: str) -> bool:
         return self.repo.restore_ignored(unique_key)
 
+    def reassign_category(self, unique_key: str, categoria_id: int) -> bool:
+        return self.repo.reassign_category(unique_key=unique_key, categoria_id=int(categoria_id))
+
     def list_pending_suggestions(self, limit: int = 200) -> pd.DataFrame:
         rows = self.repo.list_pending_suggestions(limit=limit)
         if not rows:

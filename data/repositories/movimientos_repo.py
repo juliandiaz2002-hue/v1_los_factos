@@ -200,6 +200,33 @@ class MovimientoRepository:
 
         return True
 
+    def reassign_category(self, unique_key: str, categoria_id: int, source: str = "manual_row_change") -> bool:
+        movement = self.session.scalar(
+            select(Movimiento).where(
+                Movimiento.unique_key == unique_key,
+                Movimiento.estado == MOVEMENT_STATUS_ACTIVE,
+            )
+        )
+        if not movement:
+            return False
+
+        target_category = self.session.get(Categoria, int(categoria_id))
+        if not target_category:
+            return False
+
+        movement.categoria_id = int(categoria_id)
+        movement.suggestion_status = "MANUAL"
+        movement.suggested_categoria_id = None
+
+        self.learn_category_map(
+            detalle_norm=movement.detalle_norm,
+            monto_abs_clp=movement.monto_abs_clp,
+            categoria=target_category,
+            source=source,
+            confidence=1.0,
+        )
+        return True
+
     def learn_category_map(
         self,
         *,

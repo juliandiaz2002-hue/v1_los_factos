@@ -49,6 +49,25 @@ def _render_section_header(title: str, subtitle: str) -> None:
     st.markdown(f'<div class="lf-section-subtitle">{subtitle}</div>', unsafe_allow_html=True)
 
 
+def _plotly_interactive_config() -> dict:
+    return {
+        "displaylogo": False,
+        "responsive": True,
+        "scrollZoom": False,
+        "modeBarButtonsToRemove": [
+            "lasso2d",
+            "select2d",
+            "pan2d",
+            "zoom2d",
+            "zoomIn2d",
+            "zoomOut2d",
+            "autoScale2d",
+            "resetScale2d",
+            "toggleSpikelines",
+        ],
+    }
+
+
 def _period_label(period: pd.Period) -> str:
     return f"{MONTH_SHORT.get(int(period.month), str(period.month))} {str(period.year)[2:]}"
 
@@ -183,6 +202,8 @@ def _build_projection_insights(
             "explanation": (
                 "Compara el mes filtrado contra el anterior usando el mismo corte de dias del calendario."
             ),
+            "icon": "speed",
+            "variant": "core",
         },
         {
             "title": "Core 2: Riesgo de cierre",
@@ -190,6 +211,8 @@ def _build_projection_insights(
             "explanation": (
                 "Riesgo = (cierre proyectado - promedio ultimos 3 meses) / promedio ultimos 3 meses."
             ),
+            "icon": "warning",
+            "variant": "core",
         },
         {
             "title": "Core 3: Concentracion",
@@ -197,6 +220,8 @@ def _build_projection_insights(
             "explanation": (
                 "Mide la concentracion de gasto en la categoria con mayor peso dentro del cierre proyectado."
             ),
+            "icon": "donut_large",
+            "variant": "core",
         },
     ]
 
@@ -211,6 +236,8 @@ def _build_projection_insights(
                     "en lo que queda del mes."
                 ),
                 "explanation": "Se activa cuando la proyeccion supera en al menos 12% el promedio reciente.",
+                "icon": "trending_up",
+                "variant": "dynamic",
             }
         )
     elif risk_pct <= -12:
@@ -222,6 +249,8 @@ def _build_projection_insights(
                     f"Vas por debajo de tu ritmo historico. Margen potencial: {format_clp(abs(delta_vs_baseline))}."
                 ),
                 "explanation": "Se activa cuando la proyeccion queda 12% o mas por debajo del promedio reciente.",
+                "icon": "savings",
+                "variant": "dynamic",
             }
         )
 
@@ -235,6 +264,8 @@ def _build_projection_insights(
                     "Controlar esa categoria mueve el resultado total."
                 ),
                 "explanation": "Se activa cuando la categoria lider supera 42% de la proyeccion.",
+                "icon": "hub",
+                "variant": "dynamic",
             }
         )
 
@@ -257,6 +288,8 @@ def _build_projection_insights(
                     "explanation": (
                         "Detecta categorias de baja recurrencia con ticket alto y reduce su crecimiento esperado."
                     ),
+                    "icon": "auto_awesome",
+                    "variant": "dynamic",
                 }
             )
 
@@ -271,6 +304,8 @@ def _build_projection_insights(
             "explanation": (
                 "Proyeccion de 3 meses hacia adelante anclada al cierre estimado del mes seleccionado."
             ),
+            "icon": "timeline",
+            "variant": "dynamic",
         }
     )
 
@@ -280,6 +315,8 @@ def _build_projection_insights(
             "title": str(item["title"]),
             "body": str(item["body"]),
             "explanation": str(item["explanation"]),
+            "icon": str(item.get("icon", "insights")),
+            "variant": str(item.get("variant", "dynamic")),
         }
         for item in ordered[:2]
     ]
@@ -290,6 +327,8 @@ def _build_projection_insights(
                 "title": "Dinamico: Sin alerta",
                 "body": "No se detectaron desvíos criticos fuera de tu rango habitual.",
                 "explanation": "Este bloque se completa cuando no hay eventos dinamicos prioritarios.",
+                "icon": "check_circle",
+                "variant": "dynamic",
             }
         )
 
@@ -768,14 +807,30 @@ def render_dashboard_page(session) -> None:
     )
 
     if PLOTLY_AVAILABLE:
+        chart_config = _plotly_interactive_config()
         c1, c2, c3 = st.columns(3)
         with c1:
             with st.container(border=True):
-                _render_chart_header("Distribucion por Categoria", "Total gastado este mes por categoria")
+                head1, head2 = st.columns([3.0, 1.2])
+                with head1:
+                    _render_chart_header("Distribucion por Categoria", "Total gastado este mes por categoria")
+                with head2:
+                    dist_top_n = st.selectbox(
+                        "Top categorias distribucion",
+                        options=[5, 8, 10],
+                        index=1,
+                        format_func=lambda value: f"Top {value}",
+                        key="dashboard_dist_top_n",
+                        label_visibility="collapsed",
+                    )
                 st.plotly_chart(
-                    category_distribution_chart(df_period),
+                    category_distribution_chart(
+                        df_period,
+                        top_n=dist_top_n,
+                        include_other=True,
+                    ),
                     use_container_width=True,
-                    config={"displayModeBar": False},
+                    config=chart_config,
                 )
         with c2:
             with st.container(border=True):
@@ -799,23 +854,35 @@ def render_dashboard_page(session) -> None:
                         target_month=selected_month,
                     ),
                     use_container_width=True,
-                    config={"displayModeBar": False},
+                    config=chart_config,
                 )
         with c3:
             with st.container(border=True):
-                _render_chart_header(
-                    "Comparacion Mensual",
-                    f"Hasta dia {comparison_cutoff_day}: mes seleccionado vs anterior",
-                )
+                head1, head2 = st.columns([3.0, 1.2])
+                with head1:
+                    _render_chart_header(
+                        "Comparacion Mensual",
+                        f"Hasta dia {comparison_cutoff_day}: mes seleccionado vs anterior",
+                    )
+                with head2:
+                    comp_top_n = st.selectbox(
+                        "Top categorias comparacion",
+                        options=[4, 6, 8],
+                        index=1,
+                        format_func=lambda value: f"Top {value}",
+                        key="dashboard_comp_top_n",
+                        label_visibility="collapsed",
+                    )
                 st.plotly_chart(
                     month_comparison_by_category_chart(
                         df_history,
                         target_year=selected_year,
                         target_month=selected_month,
                         day_cutoff=comparison_cutoff_day,
+                        top_n=comp_top_n,
                     ),
                     use_container_width=True,
-                    config={"displayModeBar": False},
+                    config=chart_config,
                 )
 
     else:
@@ -838,6 +905,18 @@ def render_dashboard_page(session) -> None:
     _render_section_header(
         "Proyecciones e Insights",
         "Escenarios de cierre y senales accionables para anticipar decisiones.",
+    )
+    st.markdown(
+        """
+<div class="lf-projection-banner">
+  <span class="icon">insights</span>
+  <div>
+    <div class="title">Centro de proyeccion financiera</div>
+    <div class="copy">Lecturas de riesgo, concentracion y tendencia futura para tomar decisiones accionables.</div>
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True,
     )
 
     projected_close = projection_bundle["projected_close"]
@@ -864,6 +943,8 @@ def render_dashboard_page(session) -> None:
             explanation=(
                 "Se calcula desde el gasto acumulado y el aporte esperado de cada categoria segun su recurrencia historica."
             ),
+            icon="target",
+            variant="projection",
         )
     with proj_summary_cols[1]:
         render_insight_card(
@@ -875,6 +956,8 @@ def render_dashboard_page(session) -> None:
             explanation=(
                 "Parte del cierre proyectado actual y aplica la tendencia promedio reciente para estimar el siguiente mes."
             ),
+            icon="timeline",
+            variant="projection",
         )
     with proj_summary_cols[2]:
         if risk_pct > 0:
@@ -890,6 +973,8 @@ def render_dashboard_page(session) -> None:
                 "Compara el cierre proyectado vs el promedio de los ultimos 3 meses. "
                 "Positivo = riesgo de sobregasto, negativo = cierre por debajo del ritmo historico."
             ),
+            icon="monitoring",
+            variant="projection",
         )
 
     insight_row = core_insights + dynamic_insights
@@ -900,9 +985,12 @@ def render_dashboard_page(session) -> None:
                 item["title"],
                 item["body"],
                 explanation=item["explanation"],
+                icon=item.get("icon"),
+                variant=item.get("variant", "default"),
             )
 
     if PLOTLY_AVAILABLE:
+        chart_config = _plotly_interactive_config()
         p1, p2 = st.columns([1.8, 1.2])
         with p1:
             with st.container(border=True):
@@ -913,7 +1001,7 @@ def render_dashboard_page(session) -> None:
                 st.plotly_chart(
                     projection_horizon_chart(projection_bundle["horizon_df"]),
                     use_container_width=True,
-                    config={"displayModeBar": False},
+                    config=chart_config,
                 )
                 st.caption(projection_bundle["methodology_summary"])
                 with st.expander("Ver metodologia del escenario 90 dias", expanded=False):
@@ -928,11 +1016,25 @@ def render_dashboard_page(session) -> None:
                     )
         with p2:
             with st.container(border=True):
-                _render_chart_header("Presion por Categoria", "Categorias con mayor peso esperado al cierre")
+                head1, head2 = st.columns([3.0, 1.2])
+                with head1:
+                    _render_chart_header("Presion por Categoria", "Categorias con mayor peso esperado al cierre")
+                with head2:
+                    pressure_top_n = st.selectbox(
+                        "Top presion categorias",
+                        options=[5, 8, 10],
+                        index=1,
+                        format_func=lambda value: f"Top {value}",
+                        key="dashboard_pressure_top_n",
+                        label_visibility="collapsed",
+                    )
                 st.plotly_chart(
-                    projection_chart(projection_bundle["category_projection_df"]),
+                    projection_chart(
+                        projection_bundle["category_projection_df"],
+                        top_n=pressure_top_n,
+                    ),
                     use_container_width=True,
-                    config={"displayModeBar": False},
+                    config=chart_config,
                 )
                 category_table = projection_bundle["category_projection_df"].copy()
                 if not category_table.empty:

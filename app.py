@@ -74,7 +74,9 @@ def render_top_navigation() -> str:
                     icon=icon,
                     use_container_width=True,
                 ):
-                    st.session_state.active_page = page_id
+                    if st.session_state.active_page != page_id:
+                        st.session_state.active_page = page_id
+                        st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown(f'<div class="lf-env-tag">Entorno: {settings.app_env}</div>', unsafe_allow_html=True)
     return str(st.session_state.active_page)

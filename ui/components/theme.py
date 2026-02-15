@@ -110,8 +110,51 @@ html, body, [class*="css"] {
 .lf-kpi .delta.neutral {color: #737373;}
 .lf-insight {min-height: 124px; position: relative; overflow: visible;}
 .lf-insight-head {display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:6px;}
+.lf-insight-title-wrap {display:flex; align-items:center; gap:8px;}
+.lf-insight-icon {
+  font-family: "Material Symbols Outlined";
+  font-size: 1.05rem;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid #E5E7EB;
+  background: #F8FAFC;
+  color: #475569;
+}
 .lf-insight-title {font-weight:800; font-size:15px; line-height:1.25; color:#161616;}
 .lf-insight-body {font-size:13px; color:#445555; line-height:1.45;}
+.lf-insight-body strong {font-weight:800; color:#0F172A;}
+.lf-insight-projection {
+  border-color: #C7D2FE;
+  background: linear-gradient(180deg, #EEF2FF 0%, #FFFFFF 42%);
+}
+.lf-insight-projection .lf-insight-icon {
+  border-color: #C7D2FE;
+  color: #4338CA;
+  background: #E0E7FF;
+}
+.lf-insight-core {
+  border-color: #D1FAE5;
+  background: linear-gradient(180deg, #ECFDF5 0%, #FFFFFF 46%);
+}
+.lf-insight-core .lf-insight-icon {
+  border-color: #A7F3D0;
+  color: #047857;
+  background: #D1FAE5;
+}
+.lf-insight-dynamic {
+  border-color: #FCE7F3;
+  background: linear-gradient(180deg, #FFF1F2 0%, #FFFFFF 46%);
+}
+.lf-insight-dynamic .lf-insight-icon {
+  border-color: #FBCFE8;
+  color: #BE185D;
+  background: #FCE7F3;
+}
 .lf-insight-help {
   position: relative;
   display: inline-flex;
@@ -174,6 +217,140 @@ html, body, [class*="css"] {
 .lf-chart-subtitle {font-size: 0.95rem; color: #666; margin-top: 0.12rem; margin-bottom: 0.7rem;}
 .lf-section-title {font-size: 1.48rem; font-weight: 800; margin: 0;}
 .lf-section-subtitle {font-size: .96rem; color: #666; margin-top: .2rem; margin-bottom: .8rem;}
+.lf-projection-banner {
+  border: 1px solid #C7D2FE;
+  background: linear-gradient(92deg, #EEF2FF 0%, #ECFEFF 58%, #FFFFFF 100%);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 6px 0 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lf-projection-banner .icon {
+  font-family: "Material Symbols Outlined";
+  font-size: 1.2rem;
+  color: #4338CA;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #C7D2FE;
+  background: rgba(255,255,255,0.86);
+}
+.lf-projection-banner .title {font-weight: 800; color: #1F2937; font-size: 0.95rem;}
+.lf-projection-banner .copy {font-size: 0.86rem; color: #4B5563;}
+.lf-movements-wrap {display:flex; flex-direction:column; gap:10px; margin-top: 8px;}
+.lf-mov-row {
+  display:grid;
+  grid-template-columns: 40px minmax(180px,1fr) 120px;
+  gap: 12px;
+  align-items:center;
+  border: 1px solid #E5E7EB;
+  border-radius: 14px;
+  background: #FFFFFF;
+  padding: 10px 12px;
+}
+.lf-mov-left {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border: 1px solid #E5E7EB;
+}
+.lf-mov-left .icon {
+  font-family: "Material Symbols Outlined";
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.lf-mov-detail {font-size: 0.95rem; font-weight: 700; color:#111827; line-height:1.25;}
+.lf-mov-date {font-size: 0.80rem; color:#6B7280; margin-top:2px;}
+.lf-mov-cat {
+  font-size: 0.74rem;
+  color: #475569;
+  margin-top: 2px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.lf-mov-amount {font-size: 1rem; font-weight: 800; color:#0F172A; text-align:right;}
+.lf-mov-amount.negative {color: #0F172A;}
+[data-testid="stButton"] button[kind="secondary"].lf-delete-btn {
+  border-radius: 10px;
+}
+.lf-cat-stat {
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  padding: 12px 14px;
+  min-height: 92px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+.lf-cat-stat .label {
+  color: #6B7280;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.lf-cat-stat .value {
+  color: #0F172A;
+  font-weight: 800;
+  font-size: 1.55rem;
+  margin-top: 8px;
+  line-height: 1.1;
+}
+.lf-cat-stat .value.compact {
+  font-size: 1.18rem;
+}
+.lf-cat-form-title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 6px;
+}
+.lf-cat-list-wrap {display:flex; flex-direction:column; gap:8px; margin-top:4px;}
+.lf-cat-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border: 1px solid #E5E7EB;
+}
+.lf-cat-icon .icon {
+  font-family: "Material Symbols Outlined";
+  font-size: 1.08rem;
+  line-height: 1;
+}
+.lf-cat-name {
+  font-size: 0.97rem;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.25;
+  margin-top: 2px;
+}
+.lf-cat-meta {
+  margin-top: 3px;
+}
+.lf-cat-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #D1D5DB;
+  background: #FFFFFF;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+}
+.lf-cat-badge-protected {
+  border-color: #C7D2FE;
+  background: #EEF2FF;
+  color: #3730A3;
+}
 .lf-chip-wrap {display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 12px;}
 .lf-chip {
   border: 1px solid #D4D4D4;
