@@ -20,6 +20,9 @@ try:
     from rapidocr_onnxruntime import RapidOCR
 except Exception:  # noqa: BLE001
     RapidOCR = None
+    OCR_IMPORT_ERROR = "No se pudo importar rapidocr-onnxruntime (verifica version de Python/dependencias)."
+else:
+    OCR_IMPORT_ERROR = ""
 
 
 logger = get_logger("los_factos.ocr_import")
@@ -123,10 +126,13 @@ class OcrImportService:
 
     @property
     def availability_message(self) -> str:
-        return (
-            "OCR no disponible. Instala dependencias de OCR (rapidocr-onnxruntime) "
-            "y reinicia la app."
-        )
+        if OCR_IMPORT_ERROR:
+            return (
+                "OCR no disponible. "
+                f"{OCR_IMPORT_ERROR} "
+                "En Streamlit Cloud usa Python 3.11 y reinicia la app."
+            )
+        return "OCR no disponible. Instala dependencias de OCR (rapidocr-onnxruntime) y reinicia la app."
 
     def _get_engine(self):
         if not self.available:
