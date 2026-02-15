@@ -72,7 +72,7 @@ def render_top_navigation() -> str:
                     key=f"top_nav_{page_id}",
                     type="primary" if st.session_state.active_page == page_id else "secondary",
                     icon=icon,
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     if st.session_state.active_page != page_id:
                         st.session_state.active_page = page_id

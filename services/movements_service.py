@@ -247,8 +247,9 @@ class MovementsService:
         suspicious["fecha"] = suspicious["fecha"].dt.date.astype(str)
         return suspicious[["unique_key", "fecha", "detalle", "monto_ui", "categoria"]].reset_index(drop=True)
 
-    def list_pending_suggestions(self, limit: int = 200) -> pd.DataFrame:
-        self.ensure_suggestions_for_uncategorized(limit=max(300, limit * 3))
+    def list_pending_suggestions(self, limit: int = 200, *, ensure_backfill: bool = True) -> pd.DataFrame:
+        if ensure_backfill:
+            self.ensure_suggestions_for_uncategorized(limit=max(600, limit * 8))
         rows = self.repo.list_pending_suggestions(limit=limit)
         if not rows:
             return pd.DataFrame(
@@ -281,35 +282,47 @@ class MovementsService:
             )
         return pd.DataFrame.from_records(records)
 
-    def ensure_suggestions_for_uncategorized(self, *, limit: int = 600) -> int:
+    def ensure_suggestions_for_uncategorized(self, *, limit: int = 1200, batch_size: int = 250) -> int:
         default_category = self.cat_repo.ensure_default_category()
-        candidates = self.repo.list_uncategorized_without_pending(
-            default_category_id=int(default_category.id),
-            limit=int(limit),
-        )
-        if not candidates:
-            return 0
+        total_updated = 0
+        scanned = 0
 
-        updated = 0
-        for movement in candidates:
-            suggestion = self.suggestion_service.suggest(
-                detalle_norm=str(movement.detalle_norm or ""),
-                monto_abs_clp=int(movement.monto_abs_clp),
+        while scanned < int(limit):
+            current_batch = min(int(batch_size), int(limit) - scanned)
+            candidates = self.repo.list_uncategorized_without_pending(
+                default_category_id=int(default_category.id),
+                limit=current_batch,
             )
-            if suggestion.categoria is None:
-                continue
-            if int(suggestion.categoria.id) == int(default_category.id):
-                continue
+            if not candidates:
+                break
 
-            movement.suggested_categoria_id = int(suggestion.categoria.id)
-            movement.suggestion_source = suggestion.source
-            movement.suggestion_confidence = float(suggestion.confidence)
-            movement.suggestion_status = "PENDIENTE"
-            updated += 1
+            updated = 0
+            for movement in candidates:
+                scanned += 1
+                suggestion = self.suggestion_service.suggest(
+                    detalle_norm=str(movement.detalle_norm or ""),
+                    monto_abs_clp=int(movement.monto_abs_clp),
+                )
+                if suggestion.categoria is None:
+                    continue
+                if int(suggestion.categoria.id) == int(default_category.id):
+                    continue
 
-        if updated > 0:
-            self.session.flush()
-        return updated
+                movement.suggested_categoria_id = int(suggestion.categoria.id)
+                movement.suggestion_source = suggestion.source
+                movement.suggestion_confidence = float(suggestion.confidence)
+                movement.suggestion_status = "PENDIENTE"
+                updated += 1
+
+            if updated > 0:
+                total_updated += updated
+                self.session.flush()
+
+            # Nothing changed in this batch: avoid looping over the same unresolved set.
+            if updated == 0:
+                break
+
+        return total_updated
 
     def resolve_suggestion(self, unique_key: str, decision: str, manual_category_id: int | None = None) -> bool:
         return self.repo.resolve_suggestion(

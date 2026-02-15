@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import html
 from datetime import date, datetime
+import time
 
 import streamlit as st
 
@@ -84,7 +85,31 @@ def render_movimientos_page(session) -> None:
                 st.success(f"Movimiento agregado: {unique_key}")
 
     with st.expander("Sugerencias de categoria pendientes", expanded=False):
-        pending_df = service.list_pending_suggestions(limit=120)
+        controls_left, controls_right = st.columns([3.0, 1.2])
+        with controls_left:
+            st.caption(
+                "Marca Aceptar para aplicar y sacar de la lista al instante. "
+                "Si no te gusta, usa Rechazar y asigna categoria manual por fila."
+            )
+        with controls_right:
+            refresh_backfill = st.button(
+                "Actualizar sugerencias",
+                key="refresh_pending_suggestions",
+                icon=":material/refresh:",
+                width="stretch",
+            )
+
+        backfill_state_key = "last_suggestion_backfill_ts"
+        now_ts = float(time.time())
+        last_backfill_ts = float(st.session_state.get(backfill_state_key, 0.0) or 0.0)
+        should_backfill = refresh_backfill or (now_ts - last_backfill_ts) >= 90.0
+        if should_backfill:
+            updated_backfill = service.ensure_suggestions_for_uncategorized(limit=1500, batch_size=300)
+            st.session_state[backfill_state_key] = now_ts
+            if updated_backfill > 0:
+                st.caption(f"Recomendaciones recalculadas para {updated_backfill} movimientos sin categoria.")
+
+        pending_df = service.list_pending_suggestions(limit=120, ensure_backfill=False)
         if pending_df.empty:
             st.caption("No hay sugerencias pendientes.")
         else:
@@ -94,11 +119,6 @@ def render_movimientos_page(session) -> None:
             pending_keys = set(pending_df["unique_key"].astype(str).tolist())
             manual_mode_keys = manual_mode_keys.intersection(pending_keys)
             st.session_state.manual_mode_keys = sorted(manual_mode_keys)
-
-            st.caption(
-                "Marca Aceptar para aplicar y sacar de la lista al instante. "
-                "Si no te gusta, usa Rechazar y asigna categoria manual por fila."
-            )
 
             resolved_now: set[str] = set()
             success_count = 0
@@ -349,7 +369,7 @@ def render_movimientos_page(session) -> None:
             file_name=filename,
             mime="text/csv",
             disabled=(len(csv_bytes) == 0),
-            use_container_width=True,
+            width="stretch",
         )
 
     st.markdown('<div class="lf-movements-wrap">', unsafe_allow_html=True)
@@ -370,7 +390,7 @@ def render_movimientos_page(session) -> None:
                 " ",
                 icon=f":material/{icon_name}:",
                 help=f"Cambiar categoria (actual: {category_name})",
-                use_container_width=True,
+                width="stretch",
             ):
                 st.caption(f"Categoria actual: {category_name}")
                 selected_category = st.selectbox(
@@ -383,7 +403,7 @@ def render_movimientos_page(session) -> None:
                     "Guardar categoria",
                     key=f"save_changed_category_{unique_key}",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     if selected_category == category_name:
                         st.info("La categoria ya es la misma.")
@@ -393,7 +413,8 @@ def render_movimientos_page(session) -> None:
                             session.commit()
                             st.success(f"Categoria actualizada a {selected_category}.")
                             st.rerun()
-                        st.error("No fue posible cambiar la categoria.")
+                        else:
+                            st.error("No fue posible cambiar la categoria.")
         with c2:
             st.markdown(
                 (

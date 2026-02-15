@@ -829,7 +829,7 @@ def render_dashboard_page(session) -> None:
                         top_n=dist_top_n,
                         include_other=True,
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     config=chart_config,
                 )
         with c2:
@@ -853,7 +853,7 @@ def render_dashboard_page(session) -> None:
                         target_year=selected_year,
                         target_month=selected_month,
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     config=chart_config,
                 )
         with c3:
@@ -881,7 +881,7 @@ def render_dashboard_page(session) -> None:
                         day_cutoff=comparison_cutoff_day,
                         top_n=comp_top_n,
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     config=chart_config,
                 )
 
@@ -1000,7 +1000,7 @@ def render_dashboard_page(session) -> None:
                 )
                 st.plotly_chart(
                     projection_horizon_chart(projection_bundle["horizon_df"]),
-                    use_container_width=True,
+                    width="stretch",
                     config=chart_config,
                 )
                 st.caption(projection_bundle["methodology_summary"])
@@ -1033,7 +1033,7 @@ def render_dashboard_page(session) -> None:
                         projection_bundle["category_projection_df"],
                         top_n=pressure_top_n,
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     config=chart_config,
                 )
                 category_table = projection_bundle["category_projection_df"].copy()
@@ -1047,7 +1047,7 @@ def render_dashboard_page(session) -> None:
                         category_table[["Categoria", "Gasto actual", "Proyeccion", "Recurrencia", "recurrencia_label"]].rename(
                             columns={"recurrencia_label": "Nivel"}
                         ),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
     else:

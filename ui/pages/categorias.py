@@ -63,7 +63,7 @@ def render_categorias_page(session) -> None:
             with in1:
                 new_name = st.text_input("Nombre de categoria")
             with in2:
-                submitted = st.form_submit_button("Agregar", use_container_width=True, type="primary")
+                submitted = st.form_submit_button("Agregar", width="stretch", type="primary")
             if submitted:
                 clean_name = (new_name or "").strip()
                 if not clean_name:
@@ -112,7 +112,7 @@ def render_categorias_page(session) -> None:
                 unsafe_allow_html=True,
             )
         with row3:
-            with st.popover("Renombrar", icon=":material/edit:", use_container_width=True):
+            with st.popover("Renombrar", icon=":material/edit:", width="stretch"):
                 new_label = st.text_input(
                     "Nuevo nombre",
                     value=category_name,
@@ -122,7 +122,7 @@ def render_categorias_page(session) -> None:
                     "Guardar nombre",
                     key=f"cat_rename_btn_{category.id}",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     clean_new = (new_label or "").strip()
                     if not clean_new:
@@ -138,14 +138,14 @@ def render_categorias_page(session) -> None:
             if is_default:
                 st.caption("No eliminable")
             else:
-                with st.popover("Eliminar", icon=":material/delete:", use_container_width=True):
+                with st.popover("Eliminar", icon=":material/delete:", width="stretch"):
                     st.warning(f"Se reasignaran movimientos a {DEFAULT_CATEGORY_NAME}.")
                     confirm = st.checkbox("Confirmo eliminacion", key=f"cat_delete_confirm_{category.id}")
                     if st.button(
                         "Eliminar categoria",
                         key=f"cat_delete_btn_{category.id}",
                         type="primary",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         if not confirm:
                             st.warning("Debes confirmar antes de eliminar.")

@@ -48,7 +48,7 @@ def _render_ingestion_result(result) -> None:
                 for e in result.errors
             ]
         )
-        st.dataframe(error_df, use_container_width=True)
+        st.dataframe(error_df, width="stretch")
 
 
 def _render_csv_ingestion_tab(session) -> None:
@@ -180,7 +180,7 @@ def _render_screenshot_ingestion_tab(session) -> None:
     ].copy()
     edited_df = st.data_editor(
         preview_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         num_rows="dynamic",
         disabled=["confianza_ocr", "origen_imagen", "linea_ocr", "es_gasto"],
@@ -236,7 +236,7 @@ def _render_screenshot_ingestion_tab(session) -> None:
 
     if rejected_rows:
         with st.expander(f"Lineas descartadas ({len(rejected_rows)})", expanded=False):
-            st.dataframe(pd.DataFrame(rejected_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rejected_rows), width="stretch", hide_index=True)
 
 
 def render_ingestion_page(session) -> None:
