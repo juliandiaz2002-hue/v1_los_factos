@@ -18,9 +18,9 @@ from utils.normalization import normalize_text, parse_amount
 
 try:
     from rapidocr_onnxruntime import RapidOCR
-except Exception:  # noqa: BLE001
+except Exception as exc:  # noqa: BLE001
     RapidOCR = None
-    OCR_IMPORT_ERROR = "No se pudo importar rapidocr-onnxruntime (verifica version de Python/dependencias)."
+    OCR_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 else:
     OCR_IMPORT_ERROR = ""
 
@@ -129,7 +129,7 @@ class OcrImportService:
         if OCR_IMPORT_ERROR:
             return (
                 "OCR no disponible. "
-                f"{OCR_IMPORT_ERROR} "
+                f"No se pudo importar rapidocr-onnxruntime ({OCR_IMPORT_ERROR}). "
                 "En Streamlit Cloud usa Python 3.11 y reinicia la app."
             )
         return "OCR no disponible. Instala dependencias de OCR (rapidocr-onnxruntime) y reinicia la app."
