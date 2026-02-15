@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from difflib import SequenceMatcher
 import io
+from itertools import combinations
 
 import pandas as pd
 
@@ -133,6 +135,114 @@ class MovementsService:
     def reassign_category(self, unique_key: str, categoria_id: int) -> bool:
         return self.repo.reassign_category(unique_key=unique_key, categoria_id=int(categoria_id))
 
+    def list_probable_duplicate_pairs(self, filters: MovementFilters, *, limit_pairs: int = 80) -> pd.DataFrame:
+        df = self.list_for_table(filters)
+        if df.empty:
+            return pd.DataFrame(
+                columns=[
+                    "pair_id",
+                    "monto_abs_clp",
+                    "similarity_score",
+                    "days_diff",
+                    "left_unique_key",
+                    "left_fecha",
+                    "left_detalle",
+                    "left_monto_ui",
+                    "right_unique_key",
+                    "right_fecha",
+                    "right_detalle",
+                    "right_monto_ui",
+                ]
+            )
+
+        data = df.copy()
+        data["fecha"] = pd.to_datetime(data["fecha"])
+        data["monto_abs_clp"] = data["monto_abs_clp"].astype(int)
+
+        output_rows: list[dict] = []
+        for _, group in data.groupby("monto_abs_clp"):
+            if len(group) < 2:
+                continue
+
+            subset = group.sort_values(by=["fecha", "id"], ascending=[False, False]).head(8)
+            for left_idx, right_idx in combinations(list(subset.index), 2):
+                left = subset.loc[left_idx]
+                right = subset.loc[right_idx]
+
+                left_key = str(left["unique_key"])
+                right_key = str(right["unique_key"])
+                pair_id = "|".join(sorted([left_key, right_key]))
+
+                similarity = self._detail_similarity(
+                    str(left.get("detalle_norm", "")),
+                    str(right.get("detalle_norm", "")),
+                )
+                days_diff = abs((left["fecha"] - right["fecha"]).days)
+                score = round(similarity + max(0.0, (30 - days_diff) / 150), 3)
+
+                output_rows.append(
+                    {
+                        "pair_id": pair_id,
+                        "monto_abs_clp": int(left["monto_abs_clp"]),
+                        "similarity_score": score,
+                        "days_diff": int(days_diff),
+                        "left_unique_key": left_key,
+                        "left_fecha": left["fecha"].date().isoformat(),
+                        "left_detalle": str(left["detalle"]),
+                        "left_monto_ui": int(left["monto_ui"]),
+                        "right_unique_key": right_key,
+                        "right_fecha": right["fecha"].date().isoformat(),
+                        "right_detalle": str(right["detalle"]),
+                        "right_monto_ui": int(right["monto_ui"]),
+                    }
+                )
+
+        if not output_rows:
+            return pd.DataFrame(
+                columns=[
+                    "pair_id",
+                    "monto_abs_clp",
+                    "similarity_score",
+                    "days_diff",
+                    "left_unique_key",
+                    "left_fecha",
+                    "left_detalle",
+                    "left_monto_ui",
+                    "right_unique_key",
+                    "right_fecha",
+                    "right_detalle",
+                    "right_monto_ui",
+                ]
+            )
+
+        result = pd.DataFrame(output_rows)
+        result = result.sort_values(
+            by=["similarity_score", "days_diff", "monto_abs_clp"],
+            ascending=[False, True, False],
+        )
+        result = result.drop_duplicates(subset=["pair_id"], keep="first").head(limit_pairs).reset_index(drop=True)
+        return result
+
+    def list_suspicious_small_amounts(
+        self,
+        filters: MovementFilters,
+        *,
+        threshold_abs_clp: int = 500,
+        limit_rows: int = 120,
+    ) -> pd.DataFrame:
+        df = self.list_for_table(filters)
+        if df.empty:
+            return pd.DataFrame(columns=["unique_key", "fecha", "detalle", "monto_ui", "categoria"])
+
+        suspicious = df[df["monto_abs_clp"].astype(int) < int(threshold_abs_clp)].copy()
+        if suspicious.empty:
+            return pd.DataFrame(columns=["unique_key", "fecha", "detalle", "monto_ui", "categoria"])
+
+        suspicious["fecha"] = pd.to_datetime(suspicious["fecha"])
+        suspicious = suspicious.sort_values(by=["fecha", "id"], ascending=[False, False]).head(limit_rows)
+        suspicious["fecha"] = suspicious["fecha"].dt.date.astype(str)
+        return suspicious[["unique_key", "fecha", "detalle", "monto_ui", "categoria"]].reset_index(drop=True)
+
     def list_pending_suggestions(self, limit: int = 200) -> pd.DataFrame:
         rows = self.repo.list_pending_suggestions(limit=limit)
         if not rows:
@@ -193,3 +303,7 @@ class MovementsService:
         output = io.StringIO()
         df[ordered_cols].to_csv(output, index=False)
         return output.getvalue().encode("utf-8")
+
+    @staticmethod
+    def _detail_similarity(left: str, right: str) -> float:
+        return float(SequenceMatcher(None, left or "", right or "").ratio())

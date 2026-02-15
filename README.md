@@ -7,6 +7,7 @@ Aplicacion de gastos personales en Streamlit con PostgreSQL (Render), arquitectu
 - Streamlit
 - PostgreSQL
 - SQLAlchemy + Alembic
+- OCR local gratuito (`rapidocr-onnxruntime`) para importacion desde pantallazos
 
 ## Estructura
 - `app.py`: orquestacion de paginas
@@ -38,6 +39,11 @@ alembic upgrade head
 ```bash
 streamlit run app.py
 ```
+
+## OCR desde pantallazos
+- En `Carga e ingesta` ahora existe la pestana `Importar pantallazo OCR`.
+- Flujo: subir imagenes -> revisar filas detectadas -> editar si hace falta -> importar.
+- No usa APIs pagadas: el OCR corre localmente con librerias open-source.
 
 ## Deploy
 - Produccion: branch `main` en Streamlit Community Cloud

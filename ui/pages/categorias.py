@@ -70,6 +70,7 @@ def render_categorias_page(session) -> None:
                     st.warning("Ingresa un nombre valido.")
                 else:
                     service.add(clean_name)
+                    session.commit()
                     st.success(f"Categoria creada: {clean_name}")
                     st.rerun()
 
@@ -130,6 +131,7 @@ def render_categorias_page(session) -> None:
                         st.info("No hay cambios en el nombre.")
                     else:
                         service.rename(int(category.id), clean_new)
+                        session.commit()
                         st.success("Categoria renombrada.")
                         st.rerun()
         with row4:
@@ -149,6 +151,7 @@ def render_categorias_page(session) -> None:
                             st.warning("Debes confirmar antes de eliminar.")
                         else:
                             service.delete(int(category.id))
+                            session.commit()
                             st.success("Categoria eliminada y movimientos reasignados.")
                             st.rerun()
 

@@ -29,13 +29,20 @@ def render_movement_filters(
     *,
     key_prefix: str,
     show_title: bool = True,
+    compact: bool = False,
+    show_date_range: bool = True,
 ) -> tuple[MovementFilters, list[str]]:
     if show_title:
         st.subheader("Filtros")
-    col1, col2, col3, col4 = st.columns([1.6, 1, 1, 1.2])
+    col1, col2, col3, col4 = st.columns([2.2, 1.1, 1.1, 1.5] if compact else [1.6, 1, 1, 1.2])
 
     with col1:
-        text_filter = st.text_input("Buscar texto", key=f"{key_prefix}_text")
+        text_filter = st.text_input(
+            "Buscar texto",
+            key=f"{key_prefix}_text",
+            placeholder="Buscar transaccion...",
+            label_visibility="collapsed" if compact else "visible",
+        )
 
     with col2:
         current_month = date.today().month
@@ -46,6 +53,7 @@ def render_movement_filters(
             index=month_options.index(current_month),
             format_func=lambda value: "Todos" if value == 0 else MONTH_NAMES[value],
             key=f"{key_prefix}_month",
+            label_visibility="collapsed" if compact else "visible",
         )
 
     with col3:
@@ -56,6 +64,7 @@ def render_movement_filters(
             index=2,
             format_func=lambda value: "Todos" if value == 0 else str(value),
             key=f"{key_prefix}_year",
+            label_visibility="collapsed" if compact else "visible",
         )
 
     with col4:
@@ -67,13 +76,17 @@ def render_movement_filters(
             options=list(category_options.keys()),
             format_func=lambda value: category_options[value],
             key=f"{key_prefix}_cat",
+            label_visibility="collapsed" if compact else "visible",
         )
 
-    date_range = st.date_input(
-        "Rango de fechas",
-        value=(),
-        key=f"{key_prefix}_range",
-    )
+    if show_date_range:
+        date_range = st.date_input(
+            "Rango de fechas",
+            value=(),
+            key=f"{key_prefix}_range",
+        )
+    else:
+        date_range = ()
 
     date_from = None
     date_to = None

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
+import re
 from typing import Any
 
 from data.models import Movimiento
@@ -62,6 +64,9 @@ class IngestionService:
         tombstoned = 0
         errors: list[IngestionRowError] = []
         pending: list[Movimiento] = []
+        local_ocr_seen: dict[tuple[str, int], list[str]] = {}
+        remote_ocr_seen: dict[tuple[str, int], list[str]] = {}
+        is_ocr_import = source_label.startswith("screenshot_ocr")
 
         for idx, row in enumerate(parsed.rows, start=2):
             try:
@@ -91,6 +96,16 @@ class IngestionService:
                     continue
 
                 if self.mov_repo.exists_unique_key(unique_key):
+                    duplicated += 1
+                    continue
+
+                if is_ocr_import and self._is_ocr_similar_duplicate(
+                    fecha=fecha,
+                    monto_abs_clp=monto_abs_clp,
+                    detalle_norm=detalle_norm,
+                    local_seen=local_ocr_seen,
+                    remote_seen=remote_ocr_seen,
+                ):
                     duplicated += 1
                     continue
 
@@ -139,6 +154,8 @@ class IngestionService:
                 )
                 pending.append(movement)
                 imported += 1
+                if is_ocr_import:
+                    local_ocr_seen.setdefault((fecha.isoformat(), int(monto_abs_clp)), []).append(detalle_norm)
 
                 if provided_category:
                     self.mov_repo.learn_category_map(
@@ -171,3 +188,50 @@ class IngestionService:
             encoding=parsed.encoding,
             delimiter=parsed.delimiter,
         )
+
+    def _is_ocr_similar_duplicate(
+        self,
+        *,
+        fecha,
+        monto_abs_clp: int,
+        detalle_norm: str,
+        local_seen: dict[tuple[str, int], list[str]],
+        remote_seen: dict[tuple[str, int], list[str]],
+    ) -> bool:
+        bucket_key = (fecha.isoformat(), int(monto_abs_clp))
+        for existing in local_seen.get(bucket_key, []):
+            if self._details_similar(detalle_norm, existing):
+                return True
+
+        if bucket_key not in remote_seen:
+            existing_rows = self.mov_repo.list_active_by_date_amount(fecha=fecha, monto_abs_clp=int(monto_abs_clp))
+            remote_seen[bucket_key] = [str(item.detalle_norm or "") for item in existing_rows]
+
+        for existing in remote_seen[bucket_key]:
+            if self._details_similar(detalle_norm, existing):
+                return True
+        return False
+
+    @staticmethod
+    def _details_similar(left: str, right: str) -> bool:
+        if left == right:
+            return True
+        left_tokens = IngestionService._detail_tokens(left)
+        right_tokens = IngestionService._detail_tokens(right)
+        if left_tokens and right_tokens:
+            overlap = left_tokens.intersection(right_tokens)
+            union = left_tokens.union(right_tokens)
+            if union:
+                jaccard = len(overlap) / len(union)
+                if jaccard >= 0.6:
+                    return True
+        return SequenceMatcher(None, left, right).ratio() >= 0.82
+
+    @staticmethod
+    def _detail_tokens(value: str) -> set[str]:
+        tokens = set(re.findall(r"[a-z0-9]+", str(value or "")))
+        return {
+            token
+            for token in tokens
+            if len(token) >= 3 and not token.isdigit()
+        }

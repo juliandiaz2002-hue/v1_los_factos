@@ -67,6 +67,19 @@ class MovimientoRepository:
         )
         return list(self.session.scalars(stmt).all())
 
+    def list_active_by_date_amount(self, *, fecha, monto_abs_clp: int, limit: int = 30) -> list[Movimiento]:
+        stmt = (
+            select(Movimiento)
+            .where(
+                Movimiento.estado == MOVEMENT_STATUS_ACTIVE,
+                Movimiento.fecha == fecha,
+                Movimiento.monto_abs_clp == int(monto_abs_clp),
+            )
+            .order_by(Movimiento.id.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(stmt).all())
+
     def bulk_update(self, updates: list[dict[str, Any]]) -> int:
         updated = 0
         for item in updates:

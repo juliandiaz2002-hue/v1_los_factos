@@ -2,17 +2,47 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 from datetime import date, datetime
 
 import streamlit as st
 
 from data.repositories.categorias_repo import CategoriaRepository
-from services.movements_service import MovementsService
+from services.movements_service import MovementFilters, MovementsService
 from ui.components import render_filter_chips
 from ui.pages.common import render_movement_filters
 from utils.category_icons import get_category_icon
 from utils.formatting import format_clp, format_date_display
+
+
+def _filters_from_session_state(key_prefix: str) -> MovementFilters:
+    current_date = date.today()
+    text_filter = (str(st.session_state.get(f"{key_prefix}_text", "")).strip() or None)
+
+    month_raw = st.session_state.get(f"{key_prefix}_month", current_date.month)
+    month = int(month_raw) if month_raw not in {None, "", 0} else None
+
+    year_raw = st.session_state.get(f"{key_prefix}_year", current_date.year)
+    year = int(year_raw) if year_raw not in {None, "", 0} else None
+
+    category_raw = st.session_state.get(f"{key_prefix}_cat", 0)
+    category_id = int(category_raw) if category_raw not in {None, "", 0} else None
+
+    date_range = st.session_state.get(f"{key_prefix}_range", ())
+    date_from = None
+    date_to = None
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        date_from, date_to = date_range
+
+    return MovementFilters(
+        text_filter=text_filter,
+        month=month,
+        year=year,
+        date_from=date_from,
+        date_to=date_to,
+        category_id=category_id,
+    )
 
 
 def render_movimientos_page(session) -> None:
@@ -145,7 +175,152 @@ def render_movimientos_page(session) -> None:
             if success_count > 0:
                 st.success(f"Sugerencias aplicadas: {success_count}")
 
-    filters, active_filters = render_movement_filters(categories, key_prefix="movimientos")
+    probable_filters = _filters_from_session_state("movimientos")
+
+    with st.expander("Probables duplicados", expanded=False):
+        st.caption(
+            "Alerta flexible: agrupa transacciones con mismo monto para revisar posibles duplicados "
+            "y detecta montos pequenos sospechosos."
+        )
+        suspicious_threshold = int(
+            st.number_input(
+                "Umbral de monto sospechoso (< CLP)",
+                min_value=100,
+                max_value=5000,
+                value=500,
+                step=50,
+                key="probable_duplicate_threshold",
+            )
+        )
+
+        duplicate_pairs_df = service.list_probable_duplicate_pairs(probable_filters, limit_pairs=60)
+        suspicious_df = service.list_suspicious_small_amounts(
+            probable_filters,
+            threshold_abs_clp=suspicious_threshold,
+            limit_rows=80,
+        )
+
+        if "dismissed_probable_pairs" not in st.session_state:
+            st.session_state.dismissed_probable_pairs = []
+        if "dismissed_suspicious_keys" not in st.session_state:
+            st.session_state.dismissed_suspicious_keys = []
+
+        dismissed_pairs: set[str] = set(st.session_state.dismissed_probable_pairs)
+        dismissed_suspicious: set[str] = set(st.session_state.dismissed_suspicious_keys)
+
+        if not duplicate_pairs_df.empty:
+            duplicate_pairs_df = duplicate_pairs_df[
+                ~duplicate_pairs_df["pair_id"].astype(str).isin(dismissed_pairs)
+            ].copy()
+        if not suspicious_df.empty:
+            suspicious_df = suspicious_df[
+                ~suspicious_df["unique_key"].astype(str).isin(dismissed_suspicious)
+            ].copy()
+
+        if duplicate_pairs_df.empty and suspicious_df.empty:
+            st.caption("No se detectaron candidatos en los filtros activos.")
+        else:
+            if not duplicate_pairs_df.empty:
+                st.markdown("**Posibles duplicados (mismo monto)**")
+                for item in duplicate_pairs_df.to_dict("records"):
+                    pair_id = str(item["pair_id"])
+                    pair_hash = hashlib.md5(pair_id.encode("utf-8")).hexdigest()[:12]
+                    left_key = str(item["left_unique_key"])
+                    right_key = str(item["right_unique_key"])
+                    left_amount = format_clp(float(item["left_monto_ui"]), signed=True)
+                    right_amount = format_clp(float(item["right_monto_ui"]), signed=True)
+
+                    c1, c2, c3, c4, c5 = st.columns([2.8, 2.8, 1.2, 1.2, 1.2])
+                    with c1:
+                        st.markdown(
+                            f"**A:** {item['left_detalle']}  \n{item['left_fecha']} | {left_amount}"
+                        )
+                    with c2:
+                        st.markdown(
+                            f"**B:** {item['right_detalle']}  \n{item['right_fecha']} | {right_amount}"
+                        )
+                    with c3:
+                        if st.button("Mantener", key=f"keep_pair_{pair_hash}"):
+                            dismissed_pairs.add(pair_id)
+                            st.session_state.dismissed_probable_pairs = sorted(dismissed_pairs)
+                            st.rerun()
+                    with c4:
+                        if st.button("Eliminar A", key=f"delete_pair_a_{pair_hash}"):
+                            deleted = service.delete_one(left_key, reason="probable_duplicate")
+                            if deleted:
+                                session.commit()
+                                dismissed_pairs.add(pair_id)
+                                dismissed_suspicious.add(left_key)
+                                st.session_state.dismissed_probable_pairs = sorted(dismissed_pairs)
+                                st.session_state.dismissed_suspicious_keys = sorted(dismissed_suspicious)
+                                st.success("Transaccion A eliminada.")
+                            else:
+                                st.error("No fue posible eliminar la transaccion A.")
+                            st.rerun()
+                    with c5:
+                        if st.button("Eliminar B", key=f"delete_pair_b_{pair_hash}"):
+                            deleted = service.delete_one(right_key, reason="probable_duplicate")
+                            if deleted:
+                                session.commit()
+                                dismissed_pairs.add(pair_id)
+                                dismissed_suspicious.add(right_key)
+                                st.session_state.dismissed_probable_pairs = sorted(dismissed_pairs)
+                                st.session_state.dismissed_suspicious_keys = sorted(dismissed_suspicious)
+                                st.success("Transaccion B eliminada.")
+                            else:
+                                st.error("No fue posible eliminar la transaccion B.")
+                            st.rerun()
+
+                    st.caption(
+                        f"Similitud detalle: {float(item['similarity_score']):.2f} | "
+                        f"Dias de diferencia: {int(item['days_diff'])}"
+                    )
+                    st.markdown(
+                        "<hr style='border:none;border-top:1px solid #F3F4F6;margin:6px 0 4px 0;'>",
+                        unsafe_allow_html=True,
+                    )
+
+            if not suspicious_df.empty:
+                st.markdown("**Montos sospechosos**")
+                for item in suspicious_df.to_dict("records"):
+                    unique_key = str(item["unique_key"])
+                    amount_display = format_clp(float(item["monto_ui"]), signed=True)
+
+                    c1, c2, c3 = st.columns([4.2, 1.2, 1.2])
+                    with c1:
+                        st.markdown(
+                            f"**{item['detalle']}**  \n{item['fecha']} | {amount_display} | {item['categoria']}"
+                        )
+                    with c2:
+                        if st.button("Mantener", key=f"keep_small_{unique_key}"):
+                            dismissed_suspicious.add(unique_key)
+                            st.session_state.dismissed_suspicious_keys = sorted(dismissed_suspicious)
+                            st.rerun()
+                    with c3:
+                        if st.button("Eliminar", key=f"delete_small_{unique_key}"):
+                            deleted = service.delete_one(unique_key, reason="suspicious_small_amount")
+                            if deleted:
+                                session.commit()
+                                dismissed_suspicious.add(unique_key)
+                                st.session_state.dismissed_suspicious_keys = sorted(dismissed_suspicious)
+                                st.success("Transaccion sospechosa eliminada.")
+                            else:
+                                st.error("No fue posible eliminar la transaccion.")
+                            st.rerun()
+
+                    st.markdown(
+                        "<hr style='border:none;border-top:1px solid #F3F4F6;margin:6px 0 4px 0;'>",
+                        unsafe_allow_html=True,
+                    )
+
+    with st.expander("Filtros", expanded=False):
+        filters, active_filters = render_movement_filters(
+            categories,
+            key_prefix="movimientos",
+            show_title=False,
+            compact=True,
+            show_date_range=False,
+        )
     render_filter_chips(active_filters)
 
     df = service.list_for_table(filters)
@@ -215,6 +390,7 @@ def render_movimientos_page(session) -> None:
                     else:
                         changed = service.reassign_category(unique_key, category_id_by_name[selected_category])
                         if changed:
+                            session.commit()
                             st.success(f"Categoria actualizada a {selected_category}.")
                             st.rerun()
                         st.error("No fue posible cambiar la categoria.")
@@ -246,6 +422,7 @@ def render_movimientos_page(session) -> None:
                     deleted = service.delete_one(unique_key)
                     st.session_state.pending_delete_key = None
                     if deleted:
+                        session.commit()
                         st.success("Movimiento eliminado.")
                     else:
                         st.error("No fue posible eliminar el movimiento.")
