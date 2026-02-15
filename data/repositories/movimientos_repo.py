@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, insert, select
+from sqlalchemy import and_, func, insert, or_, select
 from sqlalchemy.orm import Session
 
 from data.models import Categoria, CategoriaMap, Movimiento, MovimientoBorrado, MovimientoIgnorado
@@ -170,6 +170,27 @@ class MovimientoRepository:
                 Movimiento.estado == MOVEMENT_STATUS_ACTIVE,
                 Movimiento.suggestion_status == "PENDIENTE",
                 Movimiento.suggested_categoria_id.is_not(None),
+            )
+            .order_by(Movimiento.fecha.desc(), Movimiento.id.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(stmt).all())
+
+    def list_uncategorized_without_pending(
+        self,
+        *,
+        default_category_id: int,
+        limit: int = 600,
+    ) -> list[Movimiento]:
+        stmt = (
+            select(Movimiento)
+            .where(
+                Movimiento.estado == MOVEMENT_STATUS_ACTIVE,
+                Movimiento.categoria_id == int(default_category_id),
+                or_(
+                    Movimiento.suggested_categoria_id.is_(None),
+                    Movimiento.suggestion_status != "PENDIENTE",
+                ),
             )
             .order_by(Movimiento.fecha.desc(), Movimiento.id.desc())
             .limit(limit)

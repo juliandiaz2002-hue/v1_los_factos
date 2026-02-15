@@ -11,7 +11,9 @@ from itertools import combinations
 import pandas as pd
 
 from data.models import Categoria, Movimiento
+from data.repositories.categorias_repo import CategoriaRepository
 from data.repositories.movimientos_repo import MovimientoRepository
+from services.category_suggestion_service import CategorySuggestionService
 from services.dashboard_service import DashboardFilters, DashboardService
 from utils.constants import MOVEMENT_TYPE_EXPENSE
 from utils.config import get_settings
@@ -33,6 +35,8 @@ class MovementsService:
     def __init__(self, session):
         self.session = session
         self.repo = MovimientoRepository(session)
+        self.cat_repo = CategoriaRepository(session)
+        self.suggestion_service = CategorySuggestionService(session)
         self.dashboard = DashboardService(session)
         self.settings = get_settings()
 
@@ -244,6 +248,7 @@ class MovementsService:
         return suspicious[["unique_key", "fecha", "detalle", "monto_ui", "categoria"]].reset_index(drop=True)
 
     def list_pending_suggestions(self, limit: int = 200) -> pd.DataFrame:
+        self.ensure_suggestions_for_uncategorized(limit=max(300, limit * 3))
         rows = self.repo.list_pending_suggestions(limit=limit)
         if not rows:
             return pd.DataFrame(
@@ -275,6 +280,36 @@ class MovementsService:
                 }
             )
         return pd.DataFrame.from_records(records)
+
+    def ensure_suggestions_for_uncategorized(self, *, limit: int = 600) -> int:
+        default_category = self.cat_repo.ensure_default_category()
+        candidates = self.repo.list_uncategorized_without_pending(
+            default_category_id=int(default_category.id),
+            limit=int(limit),
+        )
+        if not candidates:
+            return 0
+
+        updated = 0
+        for movement in candidates:
+            suggestion = self.suggestion_service.suggest(
+                detalle_norm=str(movement.detalle_norm or ""),
+                monto_abs_clp=int(movement.monto_abs_clp),
+            )
+            if suggestion.categoria is None:
+                continue
+            if int(suggestion.categoria.id) == int(default_category.id):
+                continue
+
+            movement.suggested_categoria_id = int(suggestion.categoria.id)
+            movement.suggestion_source = suggestion.source
+            movement.suggestion_confidence = float(suggestion.confidence)
+            movement.suggestion_status = "PENDIENTE"
+            updated += 1
+
+        if updated > 0:
+            self.session.flush()
+        return updated
 
     def resolve_suggestion(self, unique_key: str, decision: str, manual_category_id: int | None = None) -> bool:
         return self.repo.resolve_suggestion(
