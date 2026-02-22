@@ -257,6 +257,7 @@ def parse_candidate_lines(
         date_match = _extract_date(raw_text, reference_year=reference_year, reference_month=reference_month)
         if date_match is not None:
             current_date_iso = date_match["iso"]
+        has_explicit_date = date_match is not None
 
         amount_match = _extract_amount(raw_text)
         if amount_match is None:
@@ -298,6 +299,8 @@ def parse_candidate_lines(
             )
             continue
 
+        detail = _clean_detail(detail)
+
         amount_ui = _normalize_amount_for_ingestion(
             amount_match["raw"],
             force_expense=force_expense,
@@ -305,6 +308,20 @@ def parse_candidate_lines(
 
         try:
             amount_abs, _ = parse_amount(amount_ui)
+            if _looks_like_truncated_amount(
+                raw_amount=amount_match["raw"],
+                amount_abs=amount_abs,
+                has_explicit_date=has_explicit_date,
+            ):
+                rejected.append(
+                    OcrRejectedLine(
+                        text=raw_text,
+                        reason="monto_sospechoso_ocr",
+                        confidence=line.confidence,
+                        image_name=line.image_name,
+                    )
+                )
+                continue
             unique_key = build_unique_key(
                 fecha=date.fromisoformat(final_date_iso),
                 detalle_norm=normalize_text(detail),
@@ -338,6 +355,15 @@ def parse_candidate_lines(
             "origen_imagen": line.image_name,
             "linea_ocr": raw_text,
         }
+        candidate_meta = {
+            "detail_norm": detail_norm,
+            "confidence": float(line.confidence),
+            "had_explicit_date": bool(has_explicit_date),
+            "amount_abs": int(amount_abs),
+            "fecha_iso": final_date_iso,
+            "has_prefix_artifact": _starts_with_prefix_artifact(raw_text),
+            "raw_amount": str(amount_match["raw"]),
+        }
 
         merged = False
         for idx in bucket_indexes.get(bucket_key, []):
@@ -345,19 +371,47 @@ def parse_candidate_lines(
             if not _details_similar(detail_norm, str(existing["detail_norm"])):
                 continue
             merged = True
-            if float(line.confidence) > float(existing["confidence"]):
+            has_ocr_ghost_signal = (
+                bool(candidate_meta.get("has_prefix_artifact"))
+                or bool(existing.get("has_prefix_artifact"))
+                or not (
+                    bool(candidate_meta.get("had_explicit_date"))
+                    and bool(existing.get("had_explicit_date"))
+                )
+            )
+            if _candidate_rank(candidate_meta) > _candidate_rank(existing) + 0.01:
+                if has_ocr_ghost_signal:
+                    rejected.append(
+                        OcrRejectedLine(
+                            text=str(parsed_rows[idx].get("linea_ocr", "")),
+                            reason="fila_probable_duplicada_ocr",
+                            confidence=float(parsed_rows[idx].get("confianza_ocr", 0.0)),
+                            image_name=str(parsed_rows[idx].get("origen_imagen", "")),
+                        )
+                    )
                 parsed_rows[idx] = candidate
-                parsed_meta[idx] = {"detail_norm": detail_norm, "confidence": float(line.confidence)}
+                parsed_meta[idx] = candidate_meta
+            else:
+                if has_ocr_ghost_signal:
+                    rejected.append(
+                        OcrRejectedLine(
+                            text=raw_text,
+                            reason="fila_probable_duplicada_ocr",
+                            confidence=line.confidence,
+                            image_name=line.image_name,
+                        )
+                    )
             break
 
         if merged:
             continue
 
         parsed_rows.append(candidate)
-        parsed_meta.append({"detail_norm": detail_norm, "confidence": float(line.confidence)})
+        parsed_meta.append(candidate_meta)
         bucket_indexes.setdefault(bucket_key, []).append(len(parsed_rows) - 1)
 
-    return parsed_rows, rejected
+    final_rows = _consolidate_candidates(parsed_rows, parsed_meta, rejected)
+    return final_rows, rejected
 
 
 def _extract_amount(line_text: str) -> dict[str, Any] | None:
@@ -439,6 +493,116 @@ def _normalize_amount_for_ingestion(raw_amount: str, *, force_expense: bool) -> 
         if not cleaned.startswith("-"):
             cleaned = f"-{cleaned}"
     return cleaned
+
+
+def _clean_detail(raw_detail: str) -> str:
+    detail = re.sub(r"\s+", " ", str(raw_detail or "")).strip(" -|:")
+    detail = re.sub(r"^[Rr]\s+(?=[A-Za-z0-9])", "", detail)
+    detail = re.sub(r"\s*\$\s*$", "", detail)
+    detail = re.sub(r"\s+\|\s+", " ", detail)
+    detail = re.sub(r"\s+", " ", detail).strip(" -|:")
+    return detail
+
+
+def _starts_with_prefix_artifact(value: str) -> bool:
+    return bool(re.match(r"^\s*[Rr]\s+[A-Za-z0-9]", str(value or "")))
+
+
+def _looks_like_truncated_amount(*, raw_amount: str, amount_abs: int, has_explicit_date: bool) -> bool:
+    if has_explicit_date:
+        return False
+    digits = re.sub(r"\D", "", str(raw_amount or ""))
+    if not digits:
+        return False
+    has_separator = any(symbol in str(raw_amount or "") for symbol in (".", ","))
+    has_leading_zeros = len(digits) >= 3 and digits.startswith("0")
+    if has_leading_zeros and not has_separator and int(amount_abs) < 100:
+        return True
+    if str(raw_amount or "").strip().endswith("$-") and int(amount_abs) < 100:
+        return True
+    return False
+
+
+def _candidate_rank(meta: dict[str, Any]) -> float:
+    rank = float(meta.get("confidence", 0.0))
+    if bool(meta.get("had_explicit_date")):
+        rank += 0.20
+    if bool(meta.get("has_prefix_artifact")):
+        rank -= 0.05
+    return rank
+
+
+def _consolidate_candidates(
+    rows: list[dict[str, Any]],
+    meta_rows: list[dict[str, Any]],
+    rejected: list[OcrRejectedLine],
+) -> list[dict[str, Any]]:
+    if len(rows) <= 1:
+        return rows
+
+    dropped: set[int] = set()
+    for i in range(len(rows)):
+        if i in dropped:
+            continue
+        meta_i = meta_rows[i]
+        detail_i = str(meta_i.get("detail_norm", ""))
+        date_i = date.fromisoformat(str(meta_i.get("fecha_iso")))
+        amount_i = int(meta_i.get("amount_abs", 0))
+
+        for j in range(i + 1, len(rows)):
+            if j in dropped:
+                continue
+            meta_j = meta_rows[j]
+            detail_j = str(meta_j.get("detail_norm", ""))
+            if not _details_similar(detail_i, detail_j):
+                continue
+
+            date_j = date.fromisoformat(str(meta_j.get("fecha_iso")))
+            day_diff = abs((date_i - date_j).days)
+            if day_diff > 3:
+                continue
+
+            amount_j = int(meta_j.get("amount_abs", 0))
+            both_explicit = bool(meta_i.get("had_explicit_date")) and bool(meta_j.get("had_explicit_date"))
+
+            # Prefer explicit-date candidates and suppress likely OCR ghosts duplicated across nearby days.
+            if amount_i == amount_j and not both_explicit:
+                drop_idx = j if _candidate_rank(meta_i) >= _candidate_rank(meta_j) else i
+                if drop_idx not in dropped:
+                    dropped.add(drop_idx)
+                    rejected.append(
+                        OcrRejectedLine(
+                            text=str(rows[drop_idx].get("linea_ocr", "")),
+                            reason="fila_probable_duplicada_ocr",
+                            confidence=float(rows[drop_idx].get("confianza_ocr", 0.0)),
+                            image_name=str(rows[drop_idx].get("origen_imagen", "")),
+                        )
+                    )
+                continue
+
+            # Typical OCR truncation: same merchant-like detail, nearby date, one amount tiny and one realistic.
+            low_idx = i if amount_i <= amount_j else j
+            low_amount = min(amount_i, amount_j)
+            high_amount = max(amount_i, amount_j)
+            if (
+                low_amount < 100
+                and high_amount >= 500
+                and (not bool(meta_rows[low_idx].get("had_explicit_date")) or not both_explicit)
+            ):
+                if low_idx not in dropped:
+                    dropped.add(low_idx)
+                    rejected.append(
+                        OcrRejectedLine(
+                            text=str(rows[low_idx].get("linea_ocr", "")),
+                            reason="monto_probable_truncado_ocr",
+                            confidence=float(rows[low_idx].get("confianza_ocr", 0.0)),
+                            image_name=str(rows[low_idx].get("origen_imagen", "")),
+                        )
+                    )
+
+    if not dropped:
+        return rows
+    return [row for idx, row in enumerate(rows) if idx not in dropped]
 
 
 def _details_similar(left: str, right: str) -> bool:

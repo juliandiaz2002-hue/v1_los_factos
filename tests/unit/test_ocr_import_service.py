@@ -117,3 +117,64 @@ def test_parse_candidate_lines_rejects_noise_and_missing_amount():
     reasons = {item.reason for item in rejected}
     assert "linea_descartada_por_ruido" in reasons
     assert "monto_no_detectado" in reasons
+
+
+def test_parse_candidate_lines_rejects_truncated_amount_without_explicit_date():
+    lines = [
+        OcrCandidateLine(
+            text="21/02/2026 MERCADOPAGO*SAL -$800",
+            confidence=0.99,
+            image_name="cap_6.png",
+            order_index=1,
+        ),
+        OcrCandidateLine(
+            text="MERCADOPAGO*SAL 008$-",
+            confidence=0.98,
+            image_name="cap_6.png",
+            order_index=2,
+        ),
+    ]
+
+    rows, rejected = parse_candidate_lines(
+        lines,
+        reference_year=2026,
+        reference_month=2,
+        force_expense=True,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["detalle"] == "MERCADOPAGO*SAL"
+    assert rows[0]["monto"] == "-800"
+    reasons = {item.reason for item in rejected}
+    assert "monto_sospechoso_ocr" in reasons
+
+
+def test_parse_candidate_lines_prefers_explicit_date_when_duplicate_with_same_amount():
+    lines = [
+        OcrCandidateLine(
+            text="19/02/2026 UNIMARC LAS TRANQUERAS -$18.829",
+            confidence=0.82,
+            image_name="cap_7.png",
+            order_index=1,
+        ),
+        OcrCandidateLine(
+            text="R UNIMARCLAS TRANQUERAS -$18.829",
+            confidence=0.99,
+            image_name="cap_7.png",
+            order_index=2,
+        ),
+    ]
+
+    rows, rejected = parse_candidate_lines(
+        lines,
+        reference_year=2026,
+        reference_month=2,
+        force_expense=True,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["fecha"] == "2026-02-19"
+    assert rows[0]["monto"] == "-18.829"
+    assert not rows[0]["detalle"].startswith("R ")
+    reasons = {item.reason for item in rejected}
+    assert "fila_probable_duplicada_ocr" in reasons
