@@ -24,9 +24,29 @@ class MovimientoRepository:
         stmt = select(func.count(Movimiento.id)).where(Movimiento.unique_key == unique_key)
         return bool(self.session.scalar(stmt))
 
+    def list_existing_unique_keys(self, unique_keys: list[str] | set[str]) -> set[str]:
+        if not unique_keys:
+            return set()
+        results: set[str] = set()
+        keys = [str(item) for item in unique_keys if item]
+        for chunk in self._chunked(keys):
+            stmt = select(Movimiento.unique_key).where(Movimiento.unique_key.in_(chunk))
+            results.update(str(item) for item in self.session.scalars(stmt).all())
+        return results
+
     def is_tombstoned(self, unique_key: str) -> bool:
         stmt = select(func.count(MovimientoBorrado.id)).where(MovimientoBorrado.unique_key == unique_key)
         return bool(self.session.scalar(stmt))
+
+    def list_tombstoned_unique_keys(self, unique_keys: list[str] | set[str]) -> set[str]:
+        if not unique_keys:
+            return set()
+        results: set[str] = set()
+        keys = [str(item) for item in unique_keys if item]
+        for chunk in self._chunked(keys):
+            stmt = select(MovimientoBorrado.unique_key).where(MovimientoBorrado.unique_key.in_(chunk))
+            results.update(str(item) for item in self.session.scalars(stmt).all())
+        return results
 
     def bulk_insert(self, movements: list[Movimiento]) -> None:
         if not movements:
@@ -301,3 +321,9 @@ class MovimientoRepository:
             stmt = stmt.where(CategoriaMap.monto_abs_clp == monto_abs_clp)
         stmt = stmt.order_by(CategoriaMap.confidence.desc(), CategoriaMap.hits.desc())
         return list(self.session.scalars(stmt).all())
+
+    @staticmethod
+    def _chunked(values: list[str], size: int = 900) -> list[list[str]]:
+        if size <= 0:
+            return [values]
+        return [values[idx: idx + size] for idx in range(0, len(values), size)]

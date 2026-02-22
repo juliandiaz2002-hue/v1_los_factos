@@ -25,18 +25,31 @@ class CategorySuggestionService:
     def __init__(self, session: Session):
         self.session = session
         self.mov_repo = MovimientoRepository(session)
+        self._suggest_cache: dict[tuple[str, int], CategorySuggestion] = {}
+        self._category_cache: dict[int, Categoria | None] = {}
+        self._global_dominant_cache: CategorySuggestion | None = None
+        self._first_active_cache: CategorySuggestion | None = None
+        self._similarity_pool: list[Movimiento] | None = None
 
     def suggest(self, *, detalle_norm: str, monto_abs_clp: int) -> CategorySuggestion:
+        cache_key = (str(detalle_norm), int(monto_abs_clp))
+        cached = self._suggest_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         exact = self._by_exact_map(detalle_norm=detalle_norm, monto_abs_clp=monto_abs_clp)
         if exact:
+            self._suggest_cache[cache_key] = exact
             return exact
 
         dominant = self._by_dominant_history(detalle_norm=detalle_norm)
         if dominant:
+            self._suggest_cache[cache_key] = dominant
             return dominant
 
         similar = self._by_similarity(detalle_norm=detalle_norm, monto_abs_clp=monto_abs_clp)
         if similar:
+            self._suggest_cache[cache_key] = similar
             return similar
 
         fallback_similar = self._by_similarity(
@@ -48,17 +61,22 @@ class CategorySuggestionService:
             reason="Fallback por similitud relajada",
         )
         if fallback_similar:
+            self._suggest_cache[cache_key] = fallback_similar
             return fallback_similar
 
         global_dominant = self._by_global_dominant()
         if global_dominant:
+            self._suggest_cache[cache_key] = global_dominant
             return global_dominant
 
         first_active = self._by_first_active_category()
         if first_active:
+            self._suggest_cache[cache_key] = first_active
             return first_active
 
-        return CategorySuggestion(categoria=None, source="none", confidence=0.0, reason="Sin match")
+        suggestion = CategorySuggestion(categoria=None, source="none", confidence=0.0, reason="Sin match")
+        self._suggest_cache[cache_key] = suggestion
+        return suggestion
 
     def _by_exact_map(self, *, detalle_norm: str, monto_abs_clp: int) -> CategorySuggestion | None:
         mapped = self.mov_repo.list_category_map_exact(detalle_norm, monto_abs_clp)
@@ -68,7 +86,7 @@ class CategorySuggestionService:
             return None
 
         first = mapped[0]
-        category = self.session.get(Categoria, first.categoria_id)
+        category = self._get_category(int(first.categoria_id))
         if not category or not self._is_suggestible_category(category):
             return None
         confidence = min(0.99, max(0.70, float(first.confidence)))
@@ -106,7 +124,7 @@ class CategorySuggestionService:
         if ratio < 0.60:
             return None
 
-        category = self.session.get(Categoria, int(top_cid))
+        category = self._get_category(int(top_cid))
         if not category or not self._is_suggestible_category(category):
             return None
 
@@ -128,22 +146,21 @@ class CategorySuggestionService:
         source: str = "similarity_name_amount",
         reason: str = "Similitud por nombre + monto",
     ) -> CategorySuggestion | None:
-        stmt = select(Movimiento).where(Movimiento.estado == MOVEMENT_STATUS_ACTIVE)
+        candidates = self._load_similarity_pool()
         if use_amount_window:
             amount_floor = max(0, int(monto_abs_clp * 0.70))
             amount_ceil = int(monto_abs_clp * 1.30) if monto_abs_clp > 0 else 0
-            stmt = stmt.where(
-                Movimiento.monto_abs_clp >= amount_floor,
-                Movimiento.monto_abs_clp <= amount_ceil,
-            )
-        stmt = stmt.order_by(Movimiento.fecha.desc()).limit(350)
-        candidates = list(self.session.scalars(stmt).all())
+            candidates = [
+                item
+                for item in candidates
+                if int(item.monto_abs_clp) >= amount_floor and int(item.monto_abs_clp) <= amount_ceil
+            ]
         if not candidates:
             return None
 
         best: tuple[float, Movimiento, Categoria] | None = None
         for item in candidates:
-            category = self.session.get(Categoria, int(item.categoria_id))
+            category = self._get_category(int(item.categoria_id))
             if not category or not self._is_suggestible_category(category):
                 continue
 
@@ -173,6 +190,8 @@ class CategorySuggestionService:
         )
 
     def _by_global_dominant(self) -> CategorySuggestion | None:
+        if self._global_dominant_cache is not None:
+            return self._global_dominant_cache
         stmt = (
             select(
                 Movimiento.categoria_id,
@@ -192,18 +211,21 @@ class CategorySuggestionService:
         if not top:
             return None
 
-        category = self.session.get(Categoria, int(top[0]))
+        category = self._get_category(int(top[0]))
         if not category or not self._is_suggestible_category(category):
             return None
 
-        return CategorySuggestion(
+        self._global_dominant_cache = CategorySuggestion(
             categoria=category,
             source="global_dominant_fallback",
             confidence=0.40,
             reason="Fallback por categoria dominante global",
         )
+        return self._global_dominant_cache
 
     def _by_first_active_category(self) -> CategorySuggestion | None:
+        if self._first_active_cache is not None:
+            return self._first_active_cache
         stmt = (
             select(Categoria)
             .where(
@@ -216,12 +238,31 @@ class CategorySuggestionService:
         category = self.session.scalar(stmt)
         if not category:
             return None
-        return CategorySuggestion(
+        self._first_active_cache = CategorySuggestion(
             categoria=category,
             source="active_category_baseline",
             confidence=0.25,
             reason="Fallback por primera categoria activa",
         )
+        return self._first_active_cache
+
+    def _load_similarity_pool(self, limit: int = 350) -> list[Movimiento]:
+        if self._similarity_pool is None:
+            stmt = (
+                select(Movimiento)
+                .where(Movimiento.estado == MOVEMENT_STATUS_ACTIVE)
+                .order_by(Movimiento.fecha.desc())
+                .limit(limit)
+            )
+            self._similarity_pool = list(self.session.scalars(stmt).all())
+        return self._similarity_pool
+
+    def _get_category(self, category_id: int) -> Categoria | None:
+        if category_id in self._category_cache:
+            return self._category_cache[category_id]
+        category = self.session.get(Categoria, int(category_id))
+        self._category_cache[category_id] = category
+        return category
 
     @staticmethod
     def _is_suggestible_category(category: Categoria) -> bool:

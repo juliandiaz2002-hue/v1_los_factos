@@ -53,9 +53,26 @@ class IngestionService:
         if not payload:
             raise IngestionAppError("Archivo vacio")
 
+        parsed = parse_csv(payload)
+        return self.ingest_rows(
+            parsed.rows,
+            source_label=source_label,
+            date_formats=date_formats,
+            encoding=parsed.encoding,
+            delimiter=parsed.delimiter,
+        )
+
+    def ingest_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        source_label: str = "streamlit_rows",
+        date_formats: tuple[str, ...] | None = None,
+        encoding: str = "in_memory",
+        delimiter: str = "in_memory",
+    ) -> IngestionResult:
         settings = get_settings()
         accepted_formats = date_formats or settings.default_date_formats
-        parsed = parse_csv(payload)
 
         default_category = self.cat_repo.ensure_default_category()
 
@@ -68,7 +85,8 @@ class IngestionService:
         remote_ocr_seen: dict[tuple[str, int], list[str]] = {}
         is_ocr_import = source_label.startswith("screenshot_ocr")
 
-        for idx, row in enumerate(parsed.rows, start=2):
+        prepared_rows: list[dict[str, Any]] = []
+        for idx, row in enumerate(rows, start=2):
             try:
                 fecha = parse_date(str(row.get("fecha", "")), accepted_formats)
                 detail_raw = str(row.get("detalle", "")).strip()
@@ -90,81 +108,19 @@ class IngestionService:
                     detalle_norm=detalle_norm,
                     monto_abs_clp=monto_abs_clp,
                 )
-
-                if self.mov_repo.is_tombstoned(unique_key):
-                    tombstoned += 1
-                    continue
-
-                if self.mov_repo.exists_unique_key(unique_key):
-                    duplicated += 1
-                    continue
-
-                if is_ocr_import and self._is_ocr_similar_duplicate(
-                    fecha=fecha,
-                    monto_abs_clp=monto_abs_clp,
-                    detalle_norm=detalle_norm,
-                    local_seen=local_ocr_seen,
-                    remote_seen=remote_ocr_seen,
-                ):
-                    duplicated += 1
-                    continue
-
-                provided_category = str(row.get("categoria", "")).strip()
-                category = None
-                suggestion_source = "none"
-                suggestion_confidence = 0.0
-                suggestion_category_id = None
-                suggestion_status = "NA"
-
-                if provided_category:
-                    category = self.cat_repo.get_or_create(provided_category)
-                    suggestion_source = "provided_in_csv"
-                    suggestion_confidence = 1.0
-                    suggestion_status = "ACEPTADA"
-                else:
-                    suggestion = self.suggestion_service.suggest(
-                        detalle_norm=detalle_norm,
-                        monto_abs_clp=monto_abs_clp,
-                    )
-                    if suggestion.categoria is not None:
-                        category = default_category
-                        suggestion_category_id = suggestion.categoria.id
-                        suggestion_source = suggestion.source
-                        suggestion_confidence = suggestion.confidence
-                        suggestion_status = "PENDIENTE"
-
-                if category is None:
-                    category = default_category
-
-                movement = Movimiento(
-                    fecha=fecha,
-                    detalle=detail_raw,
-                    detalle_norm=detalle_norm,
-                    monto_abs_clp=monto_abs_clp,
-                    tipo_movimiento=tipo_movimiento,
-                    categoria_id=category.id,
-                    suggested_categoria_id=suggestion_category_id,
-                    suggestion_source=suggestion_source if suggestion_source != "none" else None,
-                    suggestion_confidence=suggestion_confidence if suggestion_confidence > 0 else None,
-                    suggestion_status=suggestion_status,
-                    nota_usuario=(str(row.get("nota_usuario", "")).strip() or None),
-                    unique_key=unique_key,
-                    fuente=source_label,
-                    payload_raw=row,
+                prepared_rows.append(
+                    {
+                        "row": row,
+                        "fecha": fecha,
+                        "detalle_raw": detail_raw,
+                        "detalle_norm": detalle_norm,
+                        "monto_abs_clp": int(monto_abs_clp),
+                        "tipo_movimiento": tipo_movimiento,
+                        "unique_key": unique_key,
+                        "provided_category": str(row.get("categoria", "")).strip(),
+                        "nota_usuario": (str(row.get("nota_usuario", "")).strip() or None),
+                    }
                 )
-                pending.append(movement)
-                imported += 1
-                if is_ocr_import:
-                    local_ocr_seen.setdefault((fecha.isoformat(), int(monto_abs_clp)), []).append(detalle_norm)
-
-                if provided_category:
-                    self.mov_repo.learn_category_map(
-                        detalle_norm=detalle_norm,
-                        monto_abs_clp=monto_abs_clp,
-                        categoria=category,
-                        source=suggestion_source,
-                        confidence=suggestion_confidence,
-                    )
             except Exception as exc:  # noqa: BLE001
                 errors.append(
                     IngestionRowError(
@@ -174,19 +130,117 @@ class IngestionService:
                     )
                 )
 
+        incoming_unique_keys = [str(item["unique_key"]) for item in prepared_rows]
+        tombstoned_keys = self.mov_repo.list_tombstoned_unique_keys(incoming_unique_keys)
+        existing_keys = self.mov_repo.list_existing_unique_keys(incoming_unique_keys)
+        seen_in_payload: set[str] = set()
+        category_cache: dict[str, Any] = {normalize_text(default_category.nombre): default_category}
+        suggestion_cache: dict[tuple[str, int], Any] = {}
+
+        for item in prepared_rows:
+            unique_key = str(item["unique_key"])
+            if unique_key in tombstoned_keys:
+                tombstoned += 1
+                continue
+
+            if unique_key in existing_keys or unique_key in seen_in_payload:
+                duplicated += 1
+                continue
+
+            fecha = item["fecha"]
+            detalle_norm = str(item["detalle_norm"])
+            monto_abs_clp = int(item["monto_abs_clp"])
+
+            if is_ocr_import and self._is_ocr_similar_duplicate(
+                fecha=fecha,
+                monto_abs_clp=monto_abs_clp,
+                detalle_norm=detalle_norm,
+                local_seen=local_ocr_seen,
+                remote_seen=remote_ocr_seen,
+            ):
+                duplicated += 1
+                continue
+
+            provided_category = str(item["provided_category"])
+            category = None
+            suggestion_source = "none"
+            suggestion_confidence = 0.0
+            suggestion_category_id = None
+            suggestion_status = "NA"
+
+            if provided_category:
+                normalized_category = normalize_text(provided_category)
+                category = category_cache.get(normalized_category)
+                if category is None:
+                    category = self.cat_repo.get_or_create(provided_category)
+                    category_cache[normalized_category] = category
+                suggestion_source = "provided_in_csv"
+                suggestion_confidence = 1.0
+                suggestion_status = "ACEPTADA"
+            else:
+                suggestion_key = (detalle_norm, monto_abs_clp)
+                suggestion = suggestion_cache.get(suggestion_key)
+                if suggestion is None:
+                    suggestion = self.suggestion_service.suggest(
+                        detalle_norm=detalle_norm,
+                        monto_abs_clp=monto_abs_clp,
+                    )
+                    suggestion_cache[suggestion_key] = suggestion
+                if suggestion.categoria is not None:
+                    category = default_category
+                    suggestion_category_id = suggestion.categoria.id
+                    suggestion_source = suggestion.source
+                    suggestion_confidence = suggestion.confidence
+                    suggestion_status = "PENDIENTE"
+
+            if category is None:
+                category = default_category
+
+            movement = Movimiento(
+                fecha=fecha,
+                detalle=str(item["detalle_raw"]),
+                detalle_norm=detalle_norm,
+                monto_abs_clp=monto_abs_clp,
+                tipo_movimiento=str(item["tipo_movimiento"]),
+                categoria_id=category.id,
+                suggested_categoria_id=suggestion_category_id,
+                suggestion_source=suggestion_source if suggestion_source != "none" else None,
+                suggestion_confidence=suggestion_confidence if suggestion_confidence > 0 else None,
+                suggestion_status=suggestion_status,
+                nota_usuario=item["nota_usuario"],
+                unique_key=unique_key,
+                fuente=source_label,
+                payload_raw=item["row"],
+            )
+            pending.append(movement)
+            imported += 1
+            seen_in_payload.add(unique_key)
+
+            if is_ocr_import:
+                local_ocr_seen.setdefault((fecha.isoformat(), monto_abs_clp), []).append(detalle_norm)
+
+            if provided_category:
+                self.mov_repo.learn_category_map(
+                    detalle_norm=detalle_norm,
+                    monto_abs_clp=monto_abs_clp,
+                    categoria=category,
+                    source=suggestion_source,
+                    confidence=suggestion_confidence,
+                )
+
         try:
             self.mov_repo.bulk_insert(pending)
         except Exception as exc:  # noqa: BLE001
             raise IngestionAppError(str(exc)) from exc
 
         return IngestionResult(
-            total_rows=len(parsed.rows),
+            total_rows=len(rows),
             imported=imported,
             duplicated=duplicated,
             tombstoned=tombstoned,
             errors=errors,
-            encoding=parsed.encoding,
-            delimiter=parsed.delimiter,
+            encoding=encoding,
+            delimiter=delimiter,
         )
 
     def _is_ocr_similar_duplicate(

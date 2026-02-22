@@ -213,15 +213,16 @@ def _render_screenshot_ingestion_tab(session) -> None:
                 st.warning("No hay filas validas para importar.")
             else:
                 payload_df["es_gasto"] = "1" if force_expense else ""
-                csv_payload = payload_df[
+                payload_rows = payload_df[
                     ["fecha", "detalle", "monto", "categoria", "nota_usuario", "es_gasto"]
-                ].to_csv(index=False).encode("utf-8")
+                ].to_dict(orient="records")
                 service = IngestionService(session)
-                result = service.ingest_csv(
-                    csv_payload,
-                    source_label="screenshot_ocr_upload",
-                    date_formats=("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y-%d-%m"),
-                )
+                with st.spinner("Ingestando movimientos en la base de datos..."):
+                    result = service.ingest_rows(
+                        payload_rows,
+                        source_label="screenshot_ocr_upload",
+                        date_formats=("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y-%d-%m"),
+                    )
                 _render_ingestion_result(result)
                 if result.imported > 0:
                     st.session_state["ocr_preview_rows"] = []
