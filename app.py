@@ -15,7 +15,7 @@ from ui.pages import (
     render_movimientos_page,
 )
 from utils.config import get_settings
-from utils.errors import to_user_message
+from utils.errors import AppError, to_user_message
 from utils.logging import configure_logging, get_logger
 
 
@@ -90,5 +90,8 @@ try:
         handler = page_handlers[page]
         handler(session)
 except Exception as exc:  # noqa: BLE001
-    logger.exception("Unhandled exception", extra={"extra": {"page": page}})
+    if isinstance(exc, AppError):
+        logger.warning("Application error", extra={"extra": {"page": page, "message": str(exc)}})
+    else:
+        logger.exception("Unhandled exception", extra={"extra": {"page": page}})
     st.error(to_user_message(exc))

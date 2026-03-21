@@ -7,6 +7,10 @@ class AppError(Exception):
     """Error base para fallas controladas."""
 
 
+class ConfigurationAppError(AppError):
+    """Error de configuracion o infraestructura externa."""
+
+
 class ValidationAppError(AppError):
     """Error de validacion de entradas."""
 
@@ -20,6 +24,8 @@ class DatabaseAppError(AppError):
 
 
 def to_user_message(error: Exception) -> str:
+    if isinstance(error, ConfigurationAppError):
+        return str(error)
     if isinstance(error, ValidationAppError):
         return str(error)
     if isinstance(error, IngestionAppError):
