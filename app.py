@@ -6,13 +6,14 @@ from pathlib import Path
 import sys
 
 import streamlit as st
+from sqlalchemy.engine.url import make_url
 
 ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from data.bootstrap import ensure_database_ready
-from data.session import session_scope
+from data.session import normalize_database_url, session_scope
 from ui.components import apply_global_theme
 from ui.pages import (
     render_categorias_page,
@@ -37,6 +38,25 @@ settings = get_settings()
 configure_logging(settings.log_level)
 logger = get_logger("los_factos.app")
 apply_global_theme()
+
+try:
+    normalized_database_url = normalize_database_url(settings.database_url)
+    parsed_database_url = make_url(normalized_database_url)
+    logger.info(
+        "Database configuration loaded",
+        extra={
+            "extra": {
+                "db_backend": parsed_database_url.get_backend_name(),
+                "db_driver": parsed_database_url.drivername,
+                "db_host": parsed_database_url.host,
+                "db_port": parsed_database_url.port,
+                "db_name": parsed_database_url.database,
+                "db_username": parsed_database_url.username,
+            }
+        },
+    )
+except Exception:  # noqa: BLE001
+    pass
 
 page_handlers = {
     "Dashboard": render_dashboard_page,
