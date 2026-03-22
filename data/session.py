@@ -15,9 +15,19 @@ from utils.config import get_settings
 from utils.errors import DatabaseAppError
 
 
+def normalize_database_url(database_url: str) -> str:
+    parsed = make_url(database_url)
+    drivername = parsed.drivername
+    if drivername == "postgres":
+        return database_url.replace("postgres://", "postgresql+psycopg://", 1)
+    if drivername == "postgresql":
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return database_url
+
+
 @lru_cache(maxsize=1)
 def get_engine(database_url: str | None = None) -> Engine:
-    url = database_url or get_settings().database_url
+    url = normalize_database_url(database_url or get_settings().database_url)
     parsed = make_url(url)
     if parsed.get_backend_name() == "sqlite":
         return create_engine(url, future=True, connect_args={"check_same_thread": False})
